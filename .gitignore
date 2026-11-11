@@ -1,0 +1,102 @@
+# Unity generated files (based on github/gitignore/Unity.gitignore)
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emory[Cc]aptures/
+/[Rr]ecordings/
+/.utmp/
+*.log
+
+# IDE caches and generated solution/project files
+.vs/
+.idea/
+.gradle/
+ExportedObj/
+.consulo/
+*.csproj
+*.unityproj
+*.sln
+*.slnx
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.DotSettings.user
+.vsconfig
+/[Aa]ssets/Plugins/Editor/JetBrains*
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# Build output, crash reports and backups
+sysinfo.txt
+.dirstamp
+mono_crash.*
+tmpinst-dir.stamp
+/*_BackUpThisFolder_ButDontShipItWithYourGame/
+/*_BurstDebugInformation_DoNotShip/
+*.apk
+*.aab
+*.obb
+*.app
+*.unitypackage
+*.unitypackage.meta
+crashlytics-build.properties
+/[Aa]ssets/**/*.blend1
+/[Aa]ssets/**/*.blend1.meta
+/[Aa]ssets/**/TDImportCache/
+/[Aa]ssets/**/TDImportCache.meta
+/[Aa]ssets/_Recovery/
+/[Aa]ssets/_Recovery.meta
+
+# Generated Addressables, Android and test data
+/[Aa]ssets/AddressableAssetsData/*/addressables_content_state.bin
+/[Aa]ssets/AddressableAssetsData/*/addressables_content_state.bin.meta
+/[Aa]ssets/AddressableAssetsData/link.xml
+/[Aa]ssets/AddressableAssetsData/link.xml.meta
+/[Aa]ssets/Addressables_Temp/
+/[Aa]ssets/Addressables_Temp.meta
+/[Aa]ssets/StreamingAssets/aa/
+/[Aa]ssets/StreamingAssets/aa.meta
+/ServerData/
+/[Aa]ssets/GeneratedLocalRepo/
+/[Aa]ssets/GeneratedLocalRepo.meta
+/[Aa]ssets/Plugins/Android/**/*.gradle.backup*
+/[Aa]ssets/Plugins/Android/**/local.properties
+/[Aa]ssets/Resources/PerformanceTestRunInfo.json
+/[Aa]ssets/Resources/PerformanceTestRunInfo.json.meta
+/[Aa]ssets/Resources/PerformanceTestRunSettings.json
+/[Aa]ssets/Resources/PerformanceTestRunSettings.json.meta
+/[Aa]ssets/InitTestScene*.unity
+/[Aa]ssets/InitTestScene*.unity.meta
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Core/Property Providers/
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Core/Property Providers.meta
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Flow/UnitOptions.db
+/[Aa]ssets/Unity.VisualScripting.Generated/VisualScripting.Flow/UnitOptions.db.meta
+/UIElementsSchema/
+/[Aa]ssets/[Ss]ceneDependencyCache*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Third-party paid assets: keep local, including the folder metadata
+/Assets/10.Assets/
+/Assets/10.Assets.meta
+
+# Asset Store package originals and imported vendor samples (local installation required)
+/Packages/io.realvirtual.starter/
+/Assets/Samples/realvirtual Starter/
+/Assets/Samples/realvirtual Starter.meta
