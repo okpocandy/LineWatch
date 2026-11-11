@@ -4,9 +4,10 @@ realvirtual Starter 기반 로봇 피킹·분류 라인 관제 시뮬레이터 �
 
 ## 현재 진행 상태
 
-Unity 환경 구성과 Starter Getting Started 데모 실행 검증을 완료했습니다. 자체 4축 SCARA FK·IK, 분류 제어, 관제 UI, 고장 대응과 외부 서버 연동은 기획·개발 예정 범위입니다.
+Unity 환경 구성과 Starter Getting Started 데모 실행 검증, LW-01 RobotLab 작업 씬·SCARA 작업 프리팹 구성을 완료했습니다. 씬 재열기·참조 검사와 기본 Play 검증을 마쳤습니다. 자체 4축 SCARA FK·IK, 분류 제어, 관제 UI, 고장 대응과 외부 서버 연동은 기획·개발 예정 범위입니다.
 
 자세한 범위와 검증 기준은 [기획안](Assets/Docs/Starter_Portfolio_Plan.md)에 있습니다.
+실제 작업 순서와 완료 기준은 [작업 체크리스트](Assets/Docs/LineWatch_Work_Plan.md)를 따릅니다.
 
 ## 개발 환경
 
