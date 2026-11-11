@@ -20,7 +20,7 @@
 - 1인 개발, Windows PC 실행 버전을 우선 완성한다.
 - Unity 6000.3.21f1 / URP와 realvirtual Starter 6.3.6을 사용한다. 설치, Both 입력 설정, Getting Started 데모의 실제 동작을 확인했다.
 - 개발 프로젝트는 D:\Unity_study\LineWatch로 확정했다. 기존 LineWatch 프로젝트에서 자체 작업 씬과 프리팹을 만든다. 작품의 공간은 물류 셀과 작업장으로 한정한다.
-- 실행할 작업 순서와 개별 완료 기준은 [작업 체크리스트](LineWatch_Work_Plan.md)를 따른다. C# 구동·센서 연결과 Windows 빌드는 아직 검증해야 한다.
+- 실행할 작업 순서와 개별 완료 기준은 [작업 체크리스트](LineWatch_Work_Plan.md)를 따른다. 자체 작업 씬과 Windows 독립 실행·종료 검증은 완료했으며, 자체 C# 구동·센서 연결은 아직 검증해야 한다.
 - 실제 PLC·실물 로봇, 유료 Pro 기능, 별도 웹 대시보드, XR, 멀티플레이는 첫 버전에서 제외한다. 가상 로봇과 자체 IK 구현은 작품의 핵심 범위에 포함한다.
 - 제공 데모는 학습과 기능 확인에 사용한다. 제출용 라인은 Starter의 구성 요소로 직접 배치한다.
 
@@ -162,7 +162,7 @@ Unity 명령 조회 ← 별도 C# 서버 ← 외부 조작 요청
 
 ## 10. 착수 순서와 참고
 
-설치와 데모 실행 및 [작업 체크리스트](LineWatch_Work_Plan.md)의 LW-01: 자체 RobotLab 씬과 프리팹 준비를 완료했다. 다음 순서는 LW-02 최소 Windows 빌드 검증이며, 사용자 요청 전까지 진행하지 않는다. 최소 Windows 빌드와 C# 신호 연결을 검증한 뒤 관절 구조와 FK·IK를 먼저 완성하고, 이송 셀·관제·외부 연동 순서로 진행한다.
+설치와 데모 실행 및 [작업 체크리스트](LineWatch_Work_Plan.md)의 LW-01 자체 RobotLab 씬·프리팹 준비와 LW-02 최소 Windows 빌드 검증을 완료했다. 다음 순서는 LW-03 자체 C# 구동·센서 연결 확인이며, 사용자 요청 전까지 진행하지 않는다. C# 신호 연결을 검증한 뒤 관절 구조와 FK·IK를 먼저 완성하고, 이송 셀·관제·외부 연동 순서로 진행한다.
 
 - 공식 Starter/Professional 기능 비교: https://realvirtual.io/doc/unity/basics/editions/
 - 설치 및 Unity 버전 안내: https://realvirtual.io/doc/unity/basics/installation/
