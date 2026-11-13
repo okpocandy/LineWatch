@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 6483460485044915523}
   - component: {fileID: 4951188505372408203}
   - component: {fileID: 231790983669557074}
+  - component: {fileID: 539140761830914117}
   m_Layer: 0
   m_Name: Axis3
   m_TagString: Untagged
@@ -31,7 +32,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 5301300789190256122}
+  - {fileID: 4369485595499273111}
   m_Father: {fileID: 4406634179799046952}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &4951188505372408203
@@ -91,6 +92,70 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &539140761830914117
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2696579874375164214}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a03cabe3ead7cb94caa3c03f56df8917, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::LineWatch.LinearAxis
+  speedMetresPerSecond: 0.05
+  minimumMetres: 0
+  maximumMetres: 0.15
+--- !u!1 &3478130483295325378
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4369485595499273111}
+  - component: {fileID: 8946947221201766963}
+  m_Layer: 0
+  m_Name: Axis4
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4369485595499273111
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3478130483295325378}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 5301300789190256122}
+  m_Father: {fileID: 6483460485044915523}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &8946947221201766963
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3478130483295325378}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1dc5edaa0021f742baca44d325e68e7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::LineWatch.RotaryAxis
+  speedDegreesPerSecond: 30
+  minimumDegrees: -180
+  maximumDegrees: 180
+  localRotationAxis: {x: 0, y: 1, z: 0}
 --- !u!1 &3684217844568391368
 GameObject:
   m_ObjectHideFlags: 0
@@ -198,6 +263,38 @@ MonoBehaviour:
   speedDegreesPerSecond: 30
   minimumDegrees: -170
   maximumDegrees: 170
+  localRotationAxis: {x: 0, y: 1, z: 0}
+--- !u!1 &3769679739592584468
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 242010173601926695}
+  m_Layer: 0
+  m_Name: TCP
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &242010173601926695
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3769679739592584468}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: -0.7071068, z: 0, w: 0.7071068}
+  m_LocalPosition: {x: 0, y: -0.027277002, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 5301300789190256122}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &3969405367780079643
 GameObject:
   m_ObjectHideFlags: 0
@@ -322,8 +419,9 @@ Transform:
   m_LocalPosition: {x: 0, y: -0.0069, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 6483460485044915523}
+  m_Children:
+  - {fileID: 242010173601926695}
+  m_Father: {fileID: 4369485595499273111}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &9096668095185021535
 MeshFilter:
@@ -393,6 +491,7 @@ GameObject:
   - component: {fileID: 4406634179799046952}
   - component: {fileID: 7494894141793230783}
   - component: {fileID: 5055069826068965649}
+  - component: {fileID: 6000741715542575254}
   m_Layer: 0
   m_Name: Axis2
   m_TagString: Untagged
@@ -478,6 +577,53 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!114 &6000741715542575254
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5049806177897046361}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1dc5edaa0021f742baca44d325e68e7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::LineWatch.RotaryAxis
+  speedDegreesPerSecond: 30
+  minimumDegrees: -150
+  maximumDegrees: 150
+  localRotationAxis: {x: 0, y: 1, z: 0}
+--- !u!1 &5606058783153923042
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 758926817397586795}
+  m_Layer: 0
+  m_Name: RobotFrame
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &758926817397586795
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5606058783153923042}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.22800004, z: 2.5717583e-18}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7642114252685554314}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &7009270906945398832
 GameObject:
   m_ObjectHideFlags: 0
@@ -487,6 +633,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 7642114252685554314}
+  - component: {fileID: 1973537712971217080}
   m_Layer: 0
   m_Name: ScaraRobot_Work
   m_TagString: Untagged
@@ -509,8 +656,27 @@ Transform:
   m_Children:
   - {fileID: 2478365758451474424}
   - {fileID: 5363078611738360302}
+  - {fileID: 758926817397586795}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1973537712971217080
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7009270906945398832}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f81bdd493c574d047a832b254f6e3cd6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::LineWatch.ScaraJointLab
+  axis1: {fileID: 738349329057895100}
+  axis2: {fileID: 6000741715542575254}
+  axis3: {fileID: 539140761830914117}
+  axis4: {fileID: 8946947221201766963}
+  robotFrame: {fileID: 758926817397586795}
+  tcp: {fileID: 242010173601926695}
 --- !u!1 &8762775479958380676
 GameObject:
   m_ObjectHideFlags: 0

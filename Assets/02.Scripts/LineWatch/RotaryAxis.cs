@@ -8,6 +8,7 @@ namespace LineWatch
         [SerializeField, Min(0.01f)] private float speedDegreesPerSecond = 30f;
         [SerializeField] private float minimumDegrees = -170f;
         [SerializeField] private float maximumDegrees = 170f;
+        [SerializeField] private Vector3 localRotationAxis = Vector3.up;
 
         private Quaternion homeRotation;
 
@@ -16,6 +17,9 @@ namespace LineWatch
         public bool IsMoving { get; private set; }
         public bool IsAtTarget => Mathf.Abs(CurrentPosition - TargetPosition) < 0.001f;
         public float SpeedDegreesPerSecond => speedDegreesPerSecond;
+        public float MinimumDegrees => minimumDegrees;
+        public float MaximumDegrees => maximumDegrees;
+        public Vector3 LocalRotationAxis => localRotationAxis.normalized;
 
         private void Awake()
         {
@@ -44,7 +48,7 @@ namespace LineWatch
 
             CurrentPosition = Mathf.MoveTowards(CurrentPosition, TargetPosition,
                 speedDegreesPerSecond * Time.fixedDeltaTime);
-            transform.localRotation = homeRotation * Quaternion.AngleAxis(CurrentPosition, Vector3.up);
+            transform.localRotation = homeRotation * Quaternion.AngleAxis(CurrentPosition, LocalRotationAxis);
             if (IsAtTarget) IsMoving = false;
         }
 
