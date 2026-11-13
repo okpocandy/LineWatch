@@ -13,7 +13,7 @@ namespace LineWatch.Editor
         {
             var window = EditorWindow.GetWindow<ScaraJointLabWindow>("SCARA 4축 조작 테스트");
             window.minSize = new Vector2(440f, 540f);
-            window.position = new Rect(120f, 100f, 500f, 620f);
+            window.position = new Rect(120f, 100f, 530f, 740f);
             window.Show();
             window.RefreshLab();
             window.Focus();
@@ -74,10 +74,24 @@ namespace LineWatch.Editor
             AddButton(all, "전체 정지", lab.StopAll);
             AddButton(all, "전체 홈 복귀", lab.HomeAll);
             controls.Add(all);
-            var actualState = new Label();
-            actualState.style.whiteSpace = WhiteSpace.Normal;
-            actualState.style.marginTop = 8;
-            root.Add(actualState);
+            var calculatedState = new Label { name = "scara-fk-calculated" };
+            var actualState = new Label { name = "scara-fk-actual" };
+            var errorState = new Label { name = "scara-fk-errors" };
+            foreach (var label in new[] { calculatedState, actualState, errorState })
+            {
+                label.style.whiteSpace = WhiteSpace.Normal;
+                label.style.marginTop = 8;
+                root.Add(label);
+            }
+            var fkFailure = new HelpBox("", HelpBoxMessageType.Warning) { name = "scara-fk-failure" };
+            fkFailure.style.display = DisplayStyle.None;
+            root.Add(fkFailure);
+            var geometrySettings = new Foldout { text = "FK 기하 입력 (홈·로봇 기준)", value = false };
+            var geometryFields = new[] { "fkLink1Metres", "fkLink2Metres", "fkHeight12Metres", "fkHeight23Metres", "fkToolOffsetMetres", "fkHomeToolYawDegrees" };
+            var geometryLabels = new[] { "L1 (m)", "L2 (m)", "링크 1 높이 차 (m)", "링크 2 높이 차 (m)", "홈 도구 벡터 (m)", "홈 도구 수평각 (°)" };
+            for (int i = 0; i < geometryFields.Length; i++)
+                geometrySettings.Add(new PropertyField(settingsObject.FindProperty(geometryFields[i]), geometryLabels[i]));
+            root.Add(geometrySettings);
             var settings = new Foldout { text = "축·기준점 연결", value = false };
             foreach (string field in new[] { "axis1", "axis2", "axis3", "axis4", "robotFrame", "tcp" })
                 settings.Add(new PropertyField(settingsObject.FindProperty(field)));
@@ -92,7 +106,7 @@ namespace LineWatch.Editor
                 help.text = !playing ? "상단 ▶ Play 후 목표값을 입력하고 이동을 누르세요."
                     : paused ? "일시정지 중입니다. 상단 Ⅱ 버튼을 해제하세요."
                     : !lab.IsReady ? "네 축과 RobotFrame·TCP 연결을 확인하세요."
-                    : "실제 TCP는 로봇 기준입니다. FK·IK·충돌 회피는 미구현입니다.";
+                    : "현재 관절값으로 FK를 계산합니다. 진단 좌표는 로봇 기준이며 IK·충돌 회피는 미구현입니다.";
                 for (int i = 0; i < states.Length; i++)
                 {
                     if (!lab.IsReady) { states[i].text = "축 연결 확인 필요"; continue; }
@@ -105,9 +119,31 @@ namespace LineWatch.Editor
                         : $"현재 {current:F3} / 목표 {target:F3}{(slide ? "m" : "°")} · {(moving ? "이동 중" : "정지")}"
                             + "\n범위 " + range + (string.IsNullOrEmpty(errors[i]) ? "" : "\n" + errors[i]);
                 }
-                actualState.text = playing && lab.IsReady
-                    ? FormatTcp("실제 TCP", lab.ActualTcpPosition, lab.ActualTcpYawDegrees)
-                    : "실제 TCP: Play 대기";
+                if (playing && lab.IsReady)
+                {
+                    if (lab.TryReadFkDiagnostics(out var diagnostics, out var error))
+                    {
+                        calculatedState.text = FormatTcp("계산 TCP", diagnostics.Calculated.PositionMetres, diagnostics.Calculated.YawDegrees);
+                        actualState.text = FormatTcp("실제 TCP", diagnostics.ActualPositionMetres, diagnostics.ActualYawDegrees);
+                        errorState.text = $"위치 오차 {diagnostics.PositionErrorMetres * 1000f:F6} mm\n수평각 오차 {diagnostics.YawErrorDegrees:F6}°";
+                        fkFailure.style.display = DisplayStyle.None;
+                    }
+                    else
+                    {
+                        calculatedState.text = "계산 TCP: 계산 불가";
+                        actualState.text = FormatTcp("실제 TCP", lab.ActualTcpPosition, lab.ActualTcpYawDegrees);
+                        errorState.text = "오차: 계산 불가";
+                        fkFailure.text = "FK 계산 불가. FK 기하 입력을 확인하세요.\n" + error;
+                        fkFailure.style.display = DisplayStyle.Flex;
+                    }
+                }
+                else
+                {
+                    calculatedState.text = "계산 TCP: Play 대기";
+                    actualState.text = "실제 TCP: Play 대기";
+                    errorState.text = "오차: Play 대기";
+                    fkFailure.style.display = DisplayStyle.None;
+                }
             }
             root.schedule.Execute(Refresh).Every(100);
             Refresh();

@@ -677,6 +677,12 @@ MonoBehaviour:
   axis4: {fileID: 8946947221201766963}
   robotFrame: {fileID: 758926817397586795}
   tcp: {fileID: 242010173601926695}
+  fkLink1Metres: 0.325
+  fkLink2Metres: 0.375
+  fkHeight12Metres: 0.016783
+  fkHeight23Metres: -0.097783
+  fkToolOffsetMetres: {x: 0, y: -0.034177, z: 0}
+  fkHomeToolYawDegrees: 0
 --- !u!1 &8762775479958380676
 GameObject:
   m_ObjectHideFlags: 0

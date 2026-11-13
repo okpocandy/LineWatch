@@ -161,7 +161,7 @@ Unity 명령 조회 ← 별도 C# 서버 ← 외부 조작 요청
 
 ## 10. 착수 순서와 참고
 
-초기 LW-01~03 이후 모델과 자체 구동 코드를 분리했다. LW-04 SCARA 4축 관절·좌표계 구성과 자동 검증·사용자 조작 확인을 완료했다. FANUC도 자체 6축 수동 조작까지 완료했다. 다음은 LW-05 SCARA FK이며 아직 시작하지 않았다. 기존 Windows 빌드에는 이후 기능 변경이 포함되지 않으며 새 exe 실행·종료 검증도 남아 있다.
+초기 LW-01~03 이후 모델과 자체 구동 코드를 분리했다. LW-04의 자동 검증·사용자 조작 확인과 LW-05의 공식·자체 FK 함수·진단 표시·전체 검증까지 완료했다. 같은 관절 자세 100개를 3개 배치·4개 실제 도구 설정에서 비교한 정적 대조 1,200건을 통과했으며 진단 UI는 사용자 확인 완료다. 다음은 LW-06 SCARA 해석적 IK이며 아직 시작하지 않았다. FANUC는 자체 6축 수동 조작까지다. 기존 Windows 빌드에는 이후 기능 변경이 포함되지 않으며 새 exe 실행·종료 검증도 남아 있다.
 
 - 공식 Starter/Professional 기능 비교: https://realvirtual.io/doc/unity/basics/editions/
 - 설치 및 Unity 버전 안내: https://realvirtual.io/doc/unity/basics/installation/
