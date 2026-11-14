@@ -24,11 +24,12 @@ namespace LineWatch
             homePosition = transform.localPosition;
         }
 
+        public bool CanMoveTo(float metres) => isActiveAndEnabled && Application.isPlaying &&
+            !float.IsNaN(metres) && !float.IsInfinity(metres) && metres >= minimumMetres && metres <= maximumMetres;
+
         public bool MoveTo(float metres)
         {
-            if (!isActiveAndEnabled || !Application.isPlaying || float.IsNaN(metres) ||
-                float.IsInfinity(metres) || metres < minimumMetres || metres > maximumMetres)
-                return false;
+            if (!CanMoveTo(metres)) return false;
             TargetPosition = metres;
             IsMoving = !IsAtTarget;
             return true;

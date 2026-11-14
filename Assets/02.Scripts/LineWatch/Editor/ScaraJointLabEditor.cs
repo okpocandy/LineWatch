@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
@@ -13,7 +14,7 @@ namespace LineWatch.Editor
         {
             var window = EditorWindow.GetWindow<ScaraJointLabWindow>("SCARA 4축 조작 테스트");
             window.minSize = new Vector2(440f, 540f);
-            window.position = new Rect(120f, 100f, 530f, 740f);
+            window.position = new Rect(120f, 60f, 530f, 880f);
             window.Show();
             window.RefreshLab();
             window.Focus();
@@ -35,6 +36,11 @@ namespace LineWatch.Editor
             root.Add(heading);
             var help = new HelpBox("상단 ▶ Play 후 목표값을 입력하고 이동을 누르세요.", HelpBoxMessageType.Info);
             root.Add(help);
+            root.Add(CreateIkControls(lab));
+            var jointHeading = new Label("관절별 수동 조작");
+            jointHeading.style.unityFontStyleAndWeight = FontStyle.Bold;
+            jointHeading.style.marginTop = 12;
+            root.Add(jointHeading);
             var units = new Label("1·2·4축: ° / 3축: m (0.050m = 아래로 50mm)");
             units.style.whiteSpace = WhiteSpace.Normal;
             root.Add(units);
@@ -106,7 +112,7 @@ namespace LineWatch.Editor
                 help.text = !playing ? "상단 ▶ Play 후 목표값을 입력하고 이동을 누르세요."
                     : paused ? "일시정지 중입니다. 상단 Ⅱ 버튼을 해제하세요."
                     : !lab.IsReady ? "네 축과 RobotFrame·TCP 연결을 확인하세요."
-                    : "현재 관절값으로 FK를 계산합니다. 진단 좌표는 로봇 기준이며 IK·충돌 회피는 미구현입니다.";
+                    : "IK 목표 이동 또는 관절별 수동 조작을 사용하세요. 아래 FK 진단은 현재 관절값을 읽습니다.";
                 for (int i = 0; i < states.Length; i++)
                 {
                     if (!lab.IsReady) { states[i].text = "축 연결 확인 필요"; continue; }
@@ -148,6 +154,102 @@ namespace LineWatch.Editor
             root.schedule.Execute(Refresh).Every(100);
             Refresh();
             return root;
+        }
+
+        private static VisualElement CreateIkControls(ScaraJointLab lab)
+        {
+            var root = new VisualElement { name = "scara-ik-controls" };
+            var heading = new Label("IK 목표 이동 · 로봇 기준");
+            heading.style.unityFontStyleAndWeight = FontStyle.Bold;
+            heading.style.marginTop = 12;
+            root.Add(heading);
+            root.Add(new HelpBox("목표 XYZ는 mm, 수평각은 °입니다. 각 축이 자기 속도로 움직여 TCP 직선 경로와 충돌 회피는 보장하지 않습니다.", HelpBoxMessageType.Info));
+            var inputs = new VisualElement();
+            var x = new FloatField("X (mm)") { value = 400f, name = "scara-ik-x" };
+            var y = new FloatField("Y (mm)") { value = -200f, name = "scara-ik-y" };
+            var z = new FloatField("Z (mm)") { value = -300f, name = "scara-ik-z" };
+            var yaw = new FloatField("수평각 (°)") { value = 0f, name = "scara-ik-yaw" };
+            foreach (var field in new[] { x, y, z, yaw }) inputs.Add(field);
+            var selection = new DropdownField("해 선택", new List<string> {
+                "현재 자세에서 가까운 해", "q2 양수 해", "q2 음수 해" }, 0) { name = "scara-ik-selection" };
+            inputs.Add(selection);
+            root.Add(inputs);
+            var candidates = new Label { name = "scara-ik-candidates" };
+            var chosen = new Label { name = "scara-ik-selected" };
+            var status = new Label { name = "scara-ik-status" };
+            var feedback = new HelpBox("", HelpBoxMessageType.Warning) { name = "scara-ik-feedback" };
+            foreach (var label in new[] { candidates, chosen, status })
+            {
+                label.style.whiteSpace = WhiteSpace.Normal;
+                label.style.marginTop = 6;
+            }
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.marginTop = 6;
+            var move = new Button { text = "목표로 이동", name = "scara-ik-move" };
+            var stop = new Button(() => { lab.StopAll(); status.text = "전체 정지 요청: 현재 자세를 유지합니다."; })
+                { text = "전체 정지", name = "scara-ik-stop" };
+            move.clicked += () => {
+                bool accepted = lab.TryMoveTcp(Target(), yaw.value, Mode(), out var solution, out var error);
+                status.text = accepted ? "마지막 요청 수락: " + FormatIkSolution(solution) : "요청 거부: " + error;
+                Refresh();
+            };
+            foreach (var button in new[] { move, stop })
+            {
+                button.style.flexGrow = 1;
+                button.style.minHeight = 28;
+                row.Add(button);
+            }
+            root.Add(row);
+            root.Add(candidates);
+            root.Add(chosen);
+            root.Add(feedback);
+            root.Add(status);
+
+            Vector3 Target() => new Vector3(x.value, y.value, z.value) * 0.001f;
+            ScaraJointLab.IkSelection Mode() => (ScaraJointLab.IkSelection)selection.index;
+            void Refresh()
+            {
+                if (lab == null) { root.SetEnabled(false); return; }
+                bool ready = Application.isPlaying && lab.IsReady;
+                bool canMove = ready && !EditorApplication.isPaused && Time.timeScale > 0f;
+                inputs.SetEnabled(canMove);
+                stop.SetEnabled(canMove);
+                move.SetEnabled(false);
+                feedback.style.display = DisplayStyle.None;
+                if (!ready)
+                {
+                    candidates.text = "후보: Play 상태와 네 축 연결을 확인하세요.";
+                    chosen.text = "선택 예정: 없음";
+                    status.text = "";
+                    return;
+                }
+                bool valid = lab.TrySelectTcpSolution(Target(), yaw.value, Mode(), out var result, out var solution, out var error);
+                candidates.text = result != null && result.Success ? $"후보 {result.Solutions.Count}개" : "후보 없음";
+                if (result != null && result.Success)
+                    foreach (var candidate in result.Solutions) candidates.text += "\n" + FormatIkSolution(candidate);
+                chosen.text = valid ? "선택 예정: " + FormatIkSolution(solution) : "선택 예정: 없음";
+                move.SetEnabled(canMove && valid);
+                if (!valid || solution.IsSingular || !canMove)
+                {
+                    feedback.text = !canMove ? "일시정지를 해제한 후 이동하세요."
+                        : !valid ? error : "특이 자세: 굽힘 분기가 합쳐지는 자세입니다. 속도 제어·회피 경로는 지원하지 않습니다.";
+                    feedback.style.display = DisplayStyle.Flex;
+                }
+            }
+            foreach (var field in new[] { x, y, z, yaw })
+                field.RegisterValueChangedCallback(_ => { status.text = ""; Refresh(); });
+            selection.RegisterValueChangedCallback(_ => { status.text = ""; Refresh(); });
+            root.schedule.Execute(Refresh).Every(100);
+            Refresh();
+            return root;
+        }
+
+        private static string FormatIkSolution(ScaraInverseKinematics.Solution solution)
+        {
+            var j = solution.Joints;
+            string branch = solution.ElbowSign > 0 ? "q2 양수" : solution.ElbowSign < 0 ? "q2 음수" : "특이 자세";
+            return $"{branch} · ({j.Q1Degrees:F2}°, {j.Q2Degrees:F2}°, {j.D3Metres * 1000f:F3}mm, {j.Q4Degrees:F2}°)";
         }
 
         private static string FormatTcp(string title, Vector3 positionMetres, float yawDegrees)

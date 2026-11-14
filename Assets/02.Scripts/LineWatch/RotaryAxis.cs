@@ -26,12 +26,12 @@ namespace LineWatch
             homeRotation = transform.localRotation;
         }
 
+        public bool CanMoveTo(float degrees) => isActiveAndEnabled && Application.isPlaying &&
+            !float.IsNaN(degrees) && !float.IsInfinity(degrees) && degrees >= minimumDegrees && degrees <= maximumDegrees;
+
         public bool MoveTo(float degrees)
         {
-            if (!isActiveAndEnabled || !Application.isPlaying || float.IsNaN(degrees) ||
-                float.IsInfinity(degrees) || degrees < minimumDegrees || degrees > maximumDegrees)
-                return false;
-
+            if (!CanMoveTo(degrees)) return false;
             TargetPosition = degrees;
             IsMoving = !IsAtTarget;
             return true;
