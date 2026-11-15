@@ -876,6 +876,29 @@ MonoBehaviour:
   - {fileID: 2273512333313215345}
   - {fileID: 8651672296550301548}
   tcp: {fileID: 6097859333546503713}
+  robotFrame: {fileID: 4018220953763098865}
+  geometry:
+    joints:
+    - positionMetres: {x: 0, y: 0, z: 0}
+      rotation: {x: -0, y: -0.7071068, z: -0, w: 0.7071068}
+      localRotationAxis: {x: 0, y: -1, z: 0}
+    - positionMetres: {x: 0, y: 0.245, z: 0}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      localRotationAxis: {x: 0, y: 0, z: -1}
+    - positionMetres: {x: 0, y: 0.71, z: 0}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      localRotationAxis: {x: 0, y: 0, z: -1}
+    - positionMetres: {x: -0.15, y: 0, z: 0}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      localRotationAxis: {x: -1, y: 0, z: 0}
+    - positionMetres: {x: -0.39, y: 0, z: 0}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      localRotationAxis: {x: 0, y: 0, z: -1}
+    - positionMetres: {x: -0.1, y: 0, z: 0.15}
+      rotation: {x: 0, y: 0, z: 0, w: 1}
+      localRotationAxis: {x: -1, y: 0, z: 0}
+    toolPositionMetres: {x: -0.06, y: 0, z: 0}
+    toolRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
 --- !u!1 &6115709605954226499
 GameObject:
   m_ObjectHideFlags: 0

@@ -11,6 +11,7 @@ namespace LineWatch
         [SerializeField] private Vector3 localRotationAxis = Vector3.up;
 
         private Quaternion homeRotation;
+        internal bool IsCoordinated { get; private set; }
 
         public float CurrentPosition { get; private set; }
         public float TargetPosition { get; private set; }
@@ -20,6 +21,7 @@ namespace LineWatch
         public float MinimumDegrees => minimumDegrees;
         public float MaximumDegrees => maximumDegrees;
         public Vector3 LocalRotationAxis => localRotationAxis.normalized;
+        public Quaternion HomeRotation => homeRotation;
 
         private void Awake()
         {
@@ -32,6 +34,7 @@ namespace LineWatch
         public bool MoveTo(float degrees)
         {
             if (!CanMoveTo(degrees)) return false;
+            IsCoordinated = false;
             TargetPosition = degrees;
             IsMoving = !IsAtTarget;
             return true;
@@ -39,12 +42,27 @@ namespace LineWatch
 
         public void Stop()
         {
+            IsCoordinated = false;
             IsMoving = false;
+        }
+
+        internal void BeginCoordinated(float target)
+        {
+            TargetPosition = target;
+            IsCoordinated = true;
+            IsMoving = CurrentPosition != target;
+        }
+
+        internal void ApplyCoordinated(float position, bool complete)
+        {
+            CurrentPosition = position;
+            transform.localRotation = homeRotation * Quaternion.AngleAxis(position, LocalRotationAxis);
+            if (complete) { IsMoving = false; IsCoordinated = false; }
         }
 
         private void FixedUpdate()
         {
-            if (!IsMoving) return;
+            if (!IsMoving || IsCoordinated) return;
 
             CurrentPosition = Mathf.MoveTowards(CurrentPosition, TargetPosition,
                 speedDegreesPerSecond * Time.fixedDeltaTime);

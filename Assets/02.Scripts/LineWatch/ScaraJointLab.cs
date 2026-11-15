@@ -7,6 +7,7 @@ namespace LineWatch
     public sealed class ScaraJointLab : MonoBehaviour
     {
         public enum IkSelection { Nearest, PositiveElbow, NegativeElbow }
+        public enum MotionMode { Joint, Linear }
 
         [SerializeField] private RotaryAxis axis1;
         [SerializeField] private RotaryAxis axis2;
@@ -20,6 +21,14 @@ namespace LineWatch
         [SerializeField] private float fkHeight23Metres = -0.097783f;
         [SerializeField] private Vector3 fkToolOffsetMetres = new Vector3(0f, -0.034177f, 0f);
         [SerializeField] private float fkHomeToolYawDegrees;
+
+        private ScaraMotionPlanner.Plan activePlan;
+        private Vector4 plannedSpeeds;
+        private int segmentIndex;
+        private float segmentElapsed;
+
+        public bool IsTrajectoryMoving => activePlan != null;
+        public string LastMotionError { get; private set; }
 
         public readonly struct FkDiagnostics
         {
@@ -87,9 +96,18 @@ namespace LineWatch
 
         public bool TrySelectTcpSolution(Vector3 targetMetres, float yawDegrees, IkSelection selection,
             out IK.Result result, out IK.Solution selected, out string error)
+            => TrySelectTcpSolution(targetMetres, yawDegrees, selection, MotionMode.Joint, out result, out selected, out error);
+
+        public bool TrySelectTcpSolution(Vector3 targetMetres, float yawDegrees, IkSelection selection, MotionMode motion,
+            out IK.Result result, out IK.Solution selected, out string error)
+            => TryPrepareMotion(targetMetres, yawDegrees, selection, motion, out result, out selected, out _, out error);
+
+        private bool TryPrepareMotion(Vector3 targetMetres, float yawDegrees, IkSelection selection, MotionMode motion,
+            out IK.Result result, out IK.Solution selected, out ScaraMotionPlanner.Plan plan, out string error)
         {
             result = null;
             selected = default;
+            plan = null;
             error = null;
             if (!Application.isPlaying || !IsReady)
             {
@@ -101,10 +119,13 @@ namespace LineWatch
                 error = "유효한 해 선택 방식을 지정하세요.";
                 return false;
             }
+            if (motion != MotionMode.Joint && motion != MotionMode.Linear)
+            { error = "유효한 이동 방식을 지정하세요."; return false; }
             var limits = new IK.JointLimits(
                 new IK.JointValues(axis1.MinimumDegrees, axis2.MinimumDegrees, axis3.MinimumMetres, axis4.MinimumDegrees),
                 new IK.JointValues(axis1.MaximumDegrees, axis2.MaximumDegrees, axis3.MaximumMetres, axis4.MaximumDegrees));
-            result = IK.Solve(targetMetres, yawDegrees, ReadGeometry(), limits);
+            var geometry = ReadGeometry();
+            result = IK.Solve(targetMetres, yawDegrees, geometry, limits);
             if (!result.Success)
             {
                 switch (result.Failure)
@@ -133,11 +154,42 @@ namespace LineWatch
                 selected = candidate;
                 found = true;
             }
-            if (!found) error = "선택한 굽힘 방향에 유효한 해가 없습니다. 해 선택을 바꿔보세요.";
-            return found;
+            if (!found)
+            {
+                error = "선택한 굽힘 방향에 유효한 해가 없습니다. 해 선택을 바꿔보세요.";
+                return false;
+            }
+            var start = CurrentJoints();
+            var speeds = CurrentSpeeds();
+            ScaraMotionPlanner.Failure failure;
+            bool prepared;
+            if (motion == MotionMode.Linear)
+            {
+                if (!TryReadFkDiagnostics(out var diagnostics, out error)) return false;
+                if (diagnostics.PositionErrorMetres > 0.00001f || diagnostics.YawErrorDegrees > 0.005f)
+                { error = "기하 입력과 실제 TCP가 일치하지 않아 직선 경로를 검증할 수 없습니다."; return false; }
+                int branch = selection == IkSelection.PositiveElbow ? 1 : selection == IkSelection.NegativeElbow ? -1 : 0;
+                prepared = ScaraMotionPlanner.Linear(start, targetMetres, yawDegrees, geometry, limits, speeds, branch, out plan, out failure);
+            }
+            else prepared = ScaraMotionPlanner.Joint(start, selected, limits, speeds, out plan, out failure);
+            if (!prepared)
+            {
+                error = failure == ScaraMotionPlanner.Failure.ConfigurationChangeRequired
+                    ? "현재 굽힘·회전 범위로 직선 경로를 이을 수 없습니다. 관절 이동 또는 경유점을 사용하세요."
+                    : failure == ScaraMotionPlanner.Failure.ResolutionLimit ? "경로 분할 한도 안에서 오차를 확인할 수 없습니다. 경유점을 나눠주세요."
+                    : failure == ScaraMotionPlanner.Failure.PathUnreachable ? "목표 또는 중간 경로가 도달 범위·관절 제한을 벗어납니다."
+                    : "기하·관절 범위·축 속도를 확인하세요.";
+                return false;
+            }
+            selected = plan.End;
+            return true;
         }
 
         public bool TryMoveTcp(Vector3 targetMetres, float yawDegrees, IkSelection selection,
+            out IK.Solution selected, out string error)
+            => TryMoveTcp(targetMetres, yawDegrees, selection, MotionMode.Joint, out selected, out error);
+
+        public bool TryMoveTcp(Vector3 targetMetres, float yawDegrees, IkSelection selection, MotionMode motion,
             out IK.Solution selected, out string error)
         {
             selected = default;
@@ -155,7 +207,7 @@ namespace LineWatch
                 return false;
             }
             // Recalculate on every request: a displayed candidate may have stale geometry or limits.
-            if (!TrySelectTcpSolution(targetMetres, yawDegrees, selection, out _, out selected, out error)) return false;
+            if (!TryPrepareMotion(targetMetres, yawDegrees, selection, motion, out _, out selected, out var plan, out error)) return false;
             var j = selected.Joints;
             if (!axis1.CanMoveTo(j.Q1Degrees) || !axis2.CanMoveTo(j.Q2Degrees) ||
                 !axis3.CanMoveTo(j.D3Metres) || !axis4.CanMoveTo(j.Q4Degrees))
@@ -164,30 +216,87 @@ namespace LineWatch
                 error = "네 축의 활성 상태와 허용 범위를 확인하세요.";
                 return false;
             }
-            // All four checks precede any command; these synchronous setters have no callbacks.
-            axis1.MoveTo(j.Q1Degrees);
-            axis2.MoveTo(j.Q2Degrees);
-            axis3.MoveTo(j.D3Metres);
-            axis4.MoveTo(j.Q4Degrees);
+            // Commit only the complete validated plan; a failed replacement preserves the old one.
+            activePlan = plan;
+            plannedSpeeds = CurrentSpeeds();
+            segmentIndex = 1;
+            segmentElapsed = 0f;
+            LastMotionError = null;
+            axis1.BeginCoordinated(j.Q1Degrees);
+            axis2.BeginCoordinated(j.Q2Degrees);
+            axis3.BeginCoordinated(j.D3Metres);
+            axis4.BeginCoordinated(j.Q4Degrees);
             return true;
         }
+
+        private IK.JointValues CurrentJoints() => new IK.JointValues(axis1.CurrentPosition, axis2.CurrentPosition, axis3.CurrentPosition, axis4.CurrentPosition);
+        private Vector4 CurrentSpeeds() => new Vector4(axis1.SpeedDegreesPerSecond, axis2.SpeedDegreesPerSecond, axis3.SpeedMetresPerSecond, axis4.SpeedDegreesPerSecond);
+
+        private void FixedUpdate()
+        {
+            if (activePlan == null) return;
+            var end = activePlan.End.Joints;
+            if (!IsReady || !axis1.IsCoordinated || !axis2.IsCoordinated || !axis3.IsCoordinated || !axis4.IsCoordinated ||
+                !CurrentSpeeds().Equals(plannedSpeeds) || !CanApply(end))
+            { StopAll(); LastMotionError = "경로 이동 중 축 상태·설정이 바뀌어 정지했습니다."; return; }
+            float remaining = Time.fixedDeltaTime;
+            while (activePlan != null)
+            {
+                var before = activePlan.Nodes[segmentIndex - 1];
+                var after = activePlan.Nodes[segmentIndex];
+                float duration = after.SecondsFromPrevious;
+                float step = Mathf.Min(remaining, Mathf.Max(0f, duration - segmentElapsed));
+                segmentElapsed += step;
+                remaining -= step;
+                bool segmentDone = duration <= 0f || segmentElapsed >= duration;
+                var position = ScaraMotionPlanner.Lerp(before.Joints, after.Joints, segmentDone ? 1f : segmentElapsed / duration);
+                if (!CanApply(position))
+                { StopAll(); LastMotionError = "경로의 관절값이 현재 허용 범위를 벗어나 정지했습니다."; return; }
+                bool complete = segmentDone && segmentIndex == activePlan.Nodes.Count - 1;
+                axis1.ApplyCoordinated(position.Q1Degrees, complete);
+                axis2.ApplyCoordinated(position.Q2Degrees, complete);
+                axis3.ApplyCoordinated(position.D3Metres, complete);
+                axis4.ApplyCoordinated(position.Q4Degrees, complete);
+                if (complete) { activePlan = null; break; }
+                if (segmentDone) { segmentIndex++; segmentElapsed = 0f; }
+                if (remaining <= 0f) break;
+            }
+        }
+
+        private bool CanApply(IK.JointValues j) => axis1.CanMoveTo(j.Q1Degrees) && axis2.CanMoveTo(j.Q2Degrees) &&
+            axis3.CanMoveTo(j.D3Metres) && axis4.CanMoveTo(j.Q4Degrees);
 
         public bool MoveJoint(int index, float target)
         {
             if (!Application.isPlaying || !IsReady) return false;
+            bool allowed;
             switch (index)
             {
-                case 0: return axis1.MoveTo(target);
-                case 1: return axis2.MoveTo(target);
-                case 2: return axis3.MoveTo(target);
-                case 3: return axis4.MoveTo(target);
+                case 0: allowed = axis1.CanMoveTo(target); break;
+                case 1: allowed = axis2.CanMoveTo(target); break;
+                case 2: allowed = axis3.CanMoveTo(target); break;
+                case 3: allowed = axis4.CanMoveTo(target); break;
                 default: return false;
             }
+            if (!allowed) return false;
+            if (activePlan != null) StopAll();
+            LastMotionError = null;
+            bool accepted;
+            switch (index)
+            {
+                case 0: accepted = axis1.MoveTo(target); break;
+                case 1: accepted = axis2.MoveTo(target); break;
+                case 2: accepted = axis3.MoveTo(target); break;
+                case 3: accepted = axis4.MoveTo(target); break;
+                default: return false;
+            }
+            return accepted;
         }
 
         public void StopJoint(int index)
         {
             if (!Application.isPlaying || !IsReady) return;
+            if (index >= 0 && index <= 3 && activePlan != null) { StopAll(); return; }
             switch (index)
             {
                 case 0: axis1.Stop(); break;
@@ -200,6 +309,8 @@ namespace LineWatch
         public void HomeAll()
         {
             if (!Application.isPlaying || !IsReady) return;
+            if (activePlan != null) StopAll();
+            LastMotionError = null;
             axis1.MoveTo(0f);
             axis2.MoveTo(0f);
             axis3.MoveTo(0f);
@@ -208,6 +319,7 @@ namespace LineWatch
 
         public void StopAll()
         {
+            activePlan = null;
             if (!Application.isPlaying) return;
             if (axis1 != null) axis1.Stop();
             if (axis2 != null) axis2.Stop();

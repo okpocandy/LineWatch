@@ -163,13 +163,16 @@ namespace LineWatch.Editor
             heading.style.unityFontStyleAndWeight = FontStyle.Bold;
             heading.style.marginTop = 12;
             root.Add(heading);
-            root.Add(new HelpBox("목표 XYZ는 mm, 수평각은 °입니다. 각 축이 자기 속도로 움직여 TCP 직선 경로와 충돌 회피는 보장하지 않습니다.", HelpBoxMessageType.Info));
+            root.Add(new HelpBox("관절 이동은 축별 속도 안에서 함께 도착합니다. 직선 작업 이동은 같은 굽힘·회전 범위의 중간 경로를 확인합니다. 가속도·충돌 검증은 지원하지 않습니다.", HelpBoxMessageType.Info));
             var inputs = new VisualElement();
             var x = new FloatField("X (mm)") { value = 400f, name = "scara-ik-x" };
             var y = new FloatField("Y (mm)") { value = -200f, name = "scara-ik-y" };
             var z = new FloatField("Z (mm)") { value = -300f, name = "scara-ik-z" };
             var yaw = new FloatField("수평각 (°)") { value = 0f, name = "scara-ik-yaw" };
             foreach (var field in new[] { x, y, z, yaw }) inputs.Add(field);
+            var motion = new DropdownField("이동 방식", new List<string> {
+                "관절 이동 (동기 도착)", "직선 작업 이동" }, 0) { name = "scara-ik-motion" };
+            inputs.Add(motion);
             var selection = new DropdownField("해 선택", new List<string> {
                 "현재 자세에서 가까운 해", "q2 양수 해", "q2 음수 해" }, 0) { name = "scara-ik-selection" };
             inputs.Add(selection);
@@ -177,8 +180,9 @@ namespace LineWatch.Editor
             var candidates = new Label { name = "scara-ik-candidates" };
             var chosen = new Label { name = "scara-ik-selected" };
             var status = new Label { name = "scara-ik-status" };
+            var motionState = new Label { name = "scara-motion-state" };
             var feedback = new HelpBox("", HelpBoxMessageType.Warning) { name = "scara-ik-feedback" };
-            foreach (var label in new[] { candidates, chosen, status })
+            foreach (var label in new[] { candidates, chosen, status, motionState })
             {
                 label.style.whiteSpace = WhiteSpace.Normal;
                 label.style.marginTop = 6;
@@ -190,7 +194,7 @@ namespace LineWatch.Editor
             var stop = new Button(() => { lab.StopAll(); status.text = "전체 정지 요청: 현재 자세를 유지합니다."; })
                 { text = "전체 정지", name = "scara-ik-stop" };
             move.clicked += () => {
-                bool accepted = lab.TryMoveTcp(Target(), yaw.value, Mode(), out var solution, out var error);
+                bool accepted = lab.TryMoveTcp(Target(), yaw.value, Mode(), Motion(), out var solution, out var error);
                 status.text = accepted ? "마지막 요청 수락: " + FormatIkSolution(solution) : "요청 거부: " + error;
                 Refresh();
             };
@@ -205,9 +209,11 @@ namespace LineWatch.Editor
             root.Add(chosen);
             root.Add(feedback);
             root.Add(status);
+            root.Add(motionState);
 
             Vector3 Target() => new Vector3(x.value, y.value, z.value) * 0.001f;
             ScaraJointLab.IkSelection Mode() => (ScaraJointLab.IkSelection)selection.index;
+            ScaraJointLab.MotionMode Motion() => (ScaraJointLab.MotionMode)motion.index;
             void Refresh()
             {
                 if (lab == null) { root.SetEnabled(false); return; }
@@ -222,9 +228,13 @@ namespace LineWatch.Editor
                     candidates.text = "후보: Play 상태와 네 축 연결을 확인하세요.";
                     chosen.text = "선택 예정: 없음";
                     status.text = "";
+                    motionState.text = "";
                     return;
                 }
-                bool valid = lab.TrySelectTcpSolution(Target(), yaw.value, Mode(), out var result, out var solution, out var error);
+                bool valid = lab.TrySelectTcpSolution(Target(), yaw.value, Mode(), Motion(), out var result, out var solution, out var error);
+                bool manualMoving = lab.Axis1.IsMoving || lab.Axis2.IsMoving || lab.Axis3.IsMoving || lab.Axis4.IsMoving;
+                motionState.text = lab.LastMotionError ?? (lab.IsTrajectoryMoving ? "계획한 경로로 이동 중"
+                    : manualMoving ? "관절별 수동 이동 중" : "대기·정지");
                 candidates.text = result != null && result.Success ? $"후보 {result.Solutions.Count}개" : "후보 없음";
                 if (result != null && result.Success)
                     foreach (var candidate in result.Solutions) candidates.text += "\n" + FormatIkSolution(candidate);
@@ -240,6 +250,7 @@ namespace LineWatch.Editor
             foreach (var field in new[] { x, y, z, yaw })
                 field.RegisterValueChangedCallback(_ => { status.text = ""; Refresh(); });
             selection.RegisterValueChangedCallback(_ => { status.text = ""; Refresh(); });
+            motion.RegisterValueChangedCallback(_ => { status.text = ""; Refresh(); });
             root.schedule.Execute(Refresh).Every(100);
             Refresh();
             return root;

@@ -10,6 +10,7 @@ namespace LineWatch
         [SerializeField] private float maximumMetres = 0.15f;
 
         private Vector3 homePosition;
+        internal bool IsCoordinated { get; private set; }
 
         public float CurrentPosition { get; private set; }
         public float TargetPosition { get; private set; }
@@ -30,6 +31,7 @@ namespace LineWatch
         public bool MoveTo(float metres)
         {
             if (!CanMoveTo(metres)) return false;
+            IsCoordinated = false;
             TargetPosition = metres;
             IsMoving = !IsAtTarget;
             return true;
@@ -37,12 +39,27 @@ namespace LineWatch
 
         public void Stop()
         {
+            IsCoordinated = false;
             IsMoving = false;
+        }
+
+        internal void BeginCoordinated(float target)
+        {
+            TargetPosition = target;
+            IsCoordinated = true;
+            IsMoving = CurrentPosition != target;
+        }
+
+        internal void ApplyCoordinated(float position, bool complete)
+        {
+            CurrentPosition = position;
+            transform.localPosition = homePosition + Vector3.down * position;
+            if (complete) { IsMoving = false; IsCoordinated = false; }
         }
 
         private void FixedUpdate()
         {
-            if (!IsMoving) return;
+            if (!IsMoving || IsCoordinated) return;
             CurrentPosition = Mathf.MoveTowards(CurrentPosition, TargetPosition,
                 speedMetresPerSecond * Time.fixedDeltaTime);
             transform.localPosition = homePosition + Vector3.down * CurrentPosition;

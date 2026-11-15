@@ -133,7 +133,11 @@ public static class VerifyScaraInverseKinematicsFull
         finally { PrefabUtility.UnloadPrefabContents(root); }
     }
 
-    public static async Task<object> Play()
+    public static Task<object> Play() => PlayInto("Logs/LW06");
+    public static Task<object> ContinuityRegression() => PlayInto("Logs/LW07");
+    public static Task<object> PathRegression() => PlayInto("Logs/LW07Path");
+
+    private static async Task<object> PlayInto(string reportDirectory)
     {
         Require(EditorApplication.isPlaying && !EditorApplication.isPaused && Time.timeScale > 0f, "Unpaused Play Mode required");
         var lab = UnityEngine.Object.FindFirstObjectByType<ScaraJointLab>();
@@ -196,7 +200,7 @@ public static class VerifyScaraInverseKinematicsFull
                 simulatedTimeScale = 10f, fixedDeltaTime = originalStep, wallSeconds = watch.Elapsed.TotalSeconds,
                 positionToleranceMetres = .002f, angleToleranceDegrees = .5f, sourceAssetsUnchanged = unchanged,
                 directButtonClicks = 0, scope = "100 API-driven arrivals via actual FixedUpdate axes; accelerated simulation, no collision or real robot accuracy claim", rows };
-            Write("full-play-verification.json",report);
+            Write("full-play-verification.json",report,reportDirectory);
             return new { report.passed, report.actualTargetsVerified, report.movesWithJointMotion, report.rejectedRequestsPreserved,
                 report.maxActualPositionErrorMetres, report.maxActualYawErrorDegrees, report.maxMovingFkErrorMetres,
                 report.movingSamples, report.wallSeconds, unchanged };
@@ -251,10 +255,10 @@ public static class VerifyScaraInverseKinematicsFull
     private static float[] Values(Vector3 v) => new[] { v.x,v.y,v.z };
     private static float[] Values(Vector4 v) => new[] { v.x,v.y,v.z,v.w };
     private static float[] Values(IK.JointValues j) => new[] { j.Q1Degrees,j.Q2Degrees,j.D3Metres,j.Q4Degrees };
-    private static void Write(string name,object value)
+    private static void Write(string name,object value,string directory = "Logs/LW06")
     {
-        Directory.CreateDirectory("Logs/LW06");
-        File.WriteAllText("Logs/LW06/"+name,JsonConvert.SerializeObject(value,Formatting.Indented));
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory,name),JsonConvert.SerializeObject(value,Formatting.Indented));
     }
     private static void Require(bool condition,string message) { if (!condition) throw new InvalidOperationException(message); }
     private static string Hash(string path)
