@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: caa84d17b9c3d3347b0ac068e8fa11ec, type: 3}
+  m_Name: ScaraCellHandoff
+  m_EditorClassIdentifier: Assembly-CSharp::LineWatch.RobotWaypointSet
+  robot: 0
+  approach:
+    positionMetres: {x: 0.37051818, y: -0.145177, z: -0.48045942}
+    rotation: {x: 0, y: 0, z: 0, w: 1}
+  work:
+    positionMetres: {x: 0.37051818, y: -0.215177, z: -0.48045942}
+    rotation: {x: 0, y: 0, z: 0, w: 1}
+  retreat:
+    positionMetres: {x: 0.3905182, y: -0.145177, z: -0.4604594}
+    rotation: {x: 0, y: 0, z: 0, w: 1}

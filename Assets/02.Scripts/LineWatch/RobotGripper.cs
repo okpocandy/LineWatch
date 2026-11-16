@@ -86,7 +86,8 @@ namespace LineWatch
             if (item == null || !item.IsReady) { error = "활성 집기 물체·접촉점·키네마틱 본체/콜라이더를 확인하세요."; return false; }
             if (item.Owner != null) { error = "다른 그리퍼가 보유한 물체입니다."; return false; }
             if (Tcp.IsChildOf(item.transform) || item.transform.IsChildOf(transform)) { error = "로봇 계층에 포함된 물체는 집을 수 없습니다."; return false; }
-            var gripPose = item.GripPose;
+            if (!item.TryGetGripPose(scara != null ? RobotWaypointSet.RobotType.Scara : RobotWaypointSet.RobotType.Fanuc, out var gripPose))
+            { error = "이 로봇의 상품 집기 기준이 없습니다."; return false; }
             float positionError = Vector3.Distance(contact.position, gripPose.position);
             float angleError = RotationError(contact.rotation, gripPose.rotation);
             if (!Finite(positionError) || !Finite(angleError) || positionError > PositionToleranceMetres || angleError > RotationToleranceDegrees)
@@ -120,7 +121,8 @@ namespace LineWatch
             var worldRotation = RobotFrame.rotation * tcpGoal.rotation;
             var planned = new Pose(RobotFrame.TransformPoint(tcpGoal.position) + worldRotation * Tcp.InverseTransformPoint(contact.position),
                 worldRotation * (Quaternion.Inverse(Tcp.rotation) * contact.rotation));
-            var actual = item.GripPose;
+            if (!item.TryGetGripPose(scara != null ? RobotWaypointSet.RobotType.Scara : RobotWaypointSet.RobotType.Fanuc, out var actual))
+            { error = "이 로봇의 상품 집기 기준이 없습니다."; return false; }
             float distance = Vector3.Distance(planned.position, actual.position), angle = RotationError(planned.rotation, actual.rotation);
             if (!Finite(distance) || !Finite(angle) || distance > PositionToleranceMetres || angle > RotationToleranceDegrees)
             { error = "물체가 작업점 집기 기준과 맞지 않습니다. 시험 물체를 준비하세요."; return false; }

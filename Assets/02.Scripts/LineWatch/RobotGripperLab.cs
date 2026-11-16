@@ -41,8 +41,10 @@ namespace LineWatch
             var point = worldTcpPosition + worldTcpRotation * tcp.InverseTransformPoint(gripper.Contact.position);
             var rotation = worldTcpRotation * (Quaternion.Inverse(tcp.rotation) * gripper.Contact.rotation);
             var item = TrialItem;
-            var offset = item.transform.InverseTransformPoint(item.GripPoint.position);
-            var orientation = Quaternion.Inverse(item.transform.rotation) * item.GripPoint.rotation;
+            var gripPoint = item.GetGripPoint(gripper.Scara != null ? RobotWaypointSet.RobotType.Scara : RobotWaypointSet.RobotType.Fanuc);
+            if (!item.IsReady || gripPoint == null) { error = "시험 물체의 로봇별 집기 기준을 확인하세요."; return false; }
+            var offset = item.transform.InverseTransformPoint(gripPoint.position);
+            var orientation = Quaternion.Inverse(item.transform.rotation) * gripPoint.rotation;
             var bodyRotation = rotation * Quaternion.Inverse(orientation);
             // Explicit test reset of an unowned kinematic body, before any motion command.
             item.Body.position = point - bodyRotation * offset; item.Body.rotation = bodyRotation;

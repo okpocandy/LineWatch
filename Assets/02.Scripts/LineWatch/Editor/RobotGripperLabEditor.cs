@@ -78,8 +78,9 @@ namespace LineWatch.Editor
                 release.SetEnabled(ready && g.HeldItem != null);
                 stop.SetEnabled(playing);
                 state.text = !playing ? "Play 대기" : g.HeldItem != null ? "보유: " + g.HeldItem.name : "보유: 없음";
-                alignment.text = target != null && target.IsReady && g.Contact != null
-                    ? $"기준 오차: {Vector3.Distance(g.Contact.position, target.GripPose.position) * 1000:F3}mm / {RobotGripper.RotationError(g.Contact.rotation, target.GripPose.rotation):F3}°" : "시험 물체를 준비하세요.";
+                alignment.text = target != null && g.Contact != null && target.TryGetGripPose(
+                    g.Scara != null ? RobotWaypointSet.RobotType.Scara : RobotWaypointSet.RobotType.Fanuc, out var gripPose)
+                    ? $"기준 오차: {Vector3.Distance(g.Contact.position, gripPose.position) * 1000:F3}mm / {RobotGripper.RotationError(g.Contact.rotation, gripPose.rotation):F3}°" : "시험 물체를 준비하세요.";
                 error.text = (sequence != null && sequence.IsPickPlace && !string.IsNullOrEmpty(sequence.LastError) ? sequence.LastError + "\n" : "") +
                     (string.IsNullOrEmpty(g.LastError) ? "" : "마지막 보유 중단: " + g.LastError + "\n") + (requestError ?? "");
                 error.style.display = string.IsNullOrEmpty(error.text) ? DisplayStyle.None : DisplayStyle.Flex;

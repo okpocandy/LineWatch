@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: caa84d17b9c3d3347b0ac068e8fa11ec, type: 3}
+  m_Name: FanucCellHandoff
+  m_EditorClassIdentifier: Assembly-CSharp::LineWatch.RobotWaypointSet
+  robot: 1
+  approach:
+    positionMetres: {x: -0.14999993, y: 1.026905, z: -0.9331853}
+    rotation: {x: -0.6963643, y: -0.6963643, z: -0.122787826, w: 0.122787826}
+  work:
+    positionMetres: {x: -0.14999993, y: 0.966905, z: -0.9331853}
+    rotation: {x: -0.6963643, y: -0.6963643, z: -0.122787826, w: 0.122787826}
+  retreat:
+    positionMetres: {x: -0.11999993, y: 1.026905, z: -0.9131853}
+    rotation: {x: -0.6963643, y: -0.6963643, z: -0.122787826, w: 0.122787826}
