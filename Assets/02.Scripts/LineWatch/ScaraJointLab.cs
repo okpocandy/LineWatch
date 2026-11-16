@@ -29,6 +29,8 @@ namespace LineWatch
 
         public bool IsTrajectoryMoving => activePlan != null;
         public string LastMotionError { get; private set; }
+        public uint CommandVersion { get; private set; }
+        public ScaraForwardKinematics.Geometry Geometry => ReadGeometry();
 
         public readonly struct FkDiagnostics
         {
@@ -217,6 +219,7 @@ namespace LineWatch
                 return false;
             }
             // Commit only the complete validated plan; a failed replacement preserves the old one.
+            CommandVersion++;
             activePlan = plan;
             plannedSpeeds = CurrentSpeeds();
             segmentIndex = 1;
@@ -290,6 +293,7 @@ namespace LineWatch
                 case 3: accepted = axis4.MoveTo(target); break;
                 default: return false;
             }
+            if (accepted) CommandVersion++;
             return accepted;
         }
 
@@ -297,6 +301,7 @@ namespace LineWatch
         {
             if (!Application.isPlaying || !IsReady) return;
             if (index >= 0 && index <= 3 && activePlan != null) { StopAll(); return; }
+            if (index >= 0 && index <= 3) CommandVersion++;
             switch (index)
             {
                 case 0: axis1.Stop(); break;
@@ -311,6 +316,7 @@ namespace LineWatch
             if (!Application.isPlaying || !IsReady) return;
             if (activePlan != null) StopAll();
             LastMotionError = null;
+            CommandVersion++;
             axis1.MoveTo(0f);
             axis2.MoveTo(0f);
             axis3.MoveTo(0f);
@@ -321,6 +327,7 @@ namespace LineWatch
         {
             activePlan = null;
             if (!Application.isPlaying) return;
+            CommandVersion++;
             if (axis1 != null) axis1.Stop();
             if (axis2 != null) axis2.Stop();
             if (axis3 != null) axis3.Stop();

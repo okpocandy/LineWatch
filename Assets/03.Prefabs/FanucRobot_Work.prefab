@@ -1,5 +1,36 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!1 &271583688724068766
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3472990474518913009}
+  m_Layer: 0
+  m_Name: GripContact
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3472990474518913009
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 271583688724068766}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0.16}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 6097859333546503713}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1828809246386065837
 GameObject:
   m_ObjectHideFlags: 0
@@ -262,6 +293,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1228473443974298096}
+  - {fileID: 3472990474518913009}
   m_Father: {fileID: 131028913334554994}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &3017412145096623460
@@ -832,6 +864,9 @@ GameObject:
   m_Component:
   - component: {fileID: 4018220953763098865}
   - component: {fileID: 3972214534864637234}
+  - component: {fileID: 3933528532103349743}
+  - component: {fileID: 1785259389968089107}
+  - component: {fileID: 1393263041305457868}
   m_Layer: 0
   m_Name: FanucRobot_Work
   m_TagString: Untagged
@@ -899,6 +934,54 @@ MonoBehaviour:
       localRotationAxis: {x: -1, y: 0, z: 0}
     toolPositionMetres: {x: -0.06, y: 0, z: 0}
     toolRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+--- !u!114 &3933528532103349743
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5680560785042691557}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e48862fbbd8b4d74f897c95700f435cb, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::LineWatch.RobotWaypointSequence
+  waypoints: {fileID: 11400000, guid: 72f55bf84bfe8094ca68448964b41a7b, type: 2}
+  scara: {fileID: 0}
+  fanuc: {fileID: 3972214534864637234}
+--- !u!114 &1785259389968089107
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5680560785042691557}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9ba1429ba4fa39e4faa6834aad400d73, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::LineWatch.RobotGripper
+  scara: {fileID: 0}
+  fanuc: {fileID: 3972214534864637234}
+  contact: {fileID: 3472990474518913009}
+  leftFinger: {fileID: 5911131869578731351}
+  rightFinger: {fileID: 4606850191700636927}
+  fingerTravelMetres: 0.0025
+--- !u!114 &1393263041305457868
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5680560785042691557}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 98f1b1719a1f2644182356943ebd4c5a, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::LineWatch.RobotGripperLab
+  gripper: {fileID: 1785259389968089107}
+  waypoints: {fileID: 11400000, guid: 72f55bf84bfe8094ca68448964b41a7b, type: 2}
+  trialPrefab: {fileID: 6635283190639677625, guid: 765bd579123ed694db9169135730b6e4, type: 3}
 --- !u!1 &6115709605954226499
 GameObject:
   m_ObjectHideFlags: 0

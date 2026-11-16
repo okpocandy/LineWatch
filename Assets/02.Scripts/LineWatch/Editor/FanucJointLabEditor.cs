@@ -27,6 +27,8 @@ namespace LineWatch.Editor
         internal static VisualElement CreateControls(FanucJointLab lab, SerializedObject settingsObject)
         {
             var root = new VisualElement();
+            root.Add(RobotGripperLabEditor.CreateControls(lab.GetComponent<RobotGripperLab>()));
+            root.Add(RobotWaypointSequenceEditor.CreateControls(lab.GetComponent<RobotWaypointSequence>()));
             var title = new Label("FANUC 관절 조작 테스트");
             title.style.unityFontStyleAndWeight = FontStyle.Bold;
             title.style.fontSize = 16;

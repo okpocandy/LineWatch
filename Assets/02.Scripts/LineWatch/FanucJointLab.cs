@@ -25,6 +25,7 @@ namespace LineWatch
         private TcpMotion activeMotion;
         public bool IsTcpMoving => activeMotion != null;
         public string LastMotionError { get; private set; }
+        public uint CommandVersion { get; private set; }
 
         public IReadOnlyList<RotaryAxis> Joints => joints;
         public Transform Tcp => tcp;
@@ -242,6 +243,7 @@ namespace LineWatch
             candidate.Geometry = new FanucKinematicGeometry(homes, geometry.ToolPositionMetres, geometry.ToolRotation);
             candidate.Duration *= 1.00001;
             // Commit only after every axis and the whole straight joint-space segment are valid.
+            CommandVersion++;
             activeMotion = candidate;
             LastMotionError = null;
             for (int i = 0; i < 6; i++) candidate.Axes[i].BeginCoordinated(candidate.End[i]);
@@ -337,14 +339,16 @@ namespace LineWatch
             if (!Application.isPlaying || !IsReady || index < 0 || index >= joints.Length || !joints[index].CanMoveTo(degrees)) return false;
             if (activeMotion != null) StopAll();
             LastMotionError = null;
-            return joints[index].MoveTo(degrees);
+            bool accepted = joints[index].MoveTo(degrees);
+            if (accepted) CommandVersion++;
+            return accepted;
         }
 
         public void StopJoint(int index)
         {
             if (!Application.isPlaying || index < 0 || index >= joints.Length) return;
             if (activeMotion != null) { StopAll(); return; }
-            if (joints[index] != null) joints[index].Stop();
+            if (joints[index] != null) { joints[index].Stop(); CommandVersion++; }
         }
 
         public void HomeAll()
@@ -353,12 +357,14 @@ namespace LineWatch
             foreach (var joint in joints) if (!joint.CanMoveTo(0f)) return;
             if (activeMotion != null) StopAll();
             LastMotionError = null;
+            CommandVersion++;
             foreach (var joint in joints) joint.MoveTo(0f);
         }
 
         public void StopAll()
         {
             if (!Application.isPlaying) return;
+            CommandVersion++;
             var previous = activeMotion;
             activeMotion = null;
             if (previous != null)

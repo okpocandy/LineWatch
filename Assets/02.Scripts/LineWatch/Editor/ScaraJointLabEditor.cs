@@ -28,6 +28,8 @@ namespace LineWatch.Editor
         internal static VisualElement CreateControls(ScaraJointLab lab, SerializedObject settingsObject)
         {
             var root = new VisualElement();
+            root.Add(RobotGripperLabEditor.CreateControls(lab.GetComponent<RobotGripperLab>()));
+            root.Add(RobotWaypointSequenceEditor.CreateControls(lab.GetComponent<RobotWaypointSequence>()));
             var heading = new Label("SCARA 4축 조작 테스트");
             heading.style.unityFontStyleAndWeight = FontStyle.Bold;
             heading.style.fontSize = 16;
