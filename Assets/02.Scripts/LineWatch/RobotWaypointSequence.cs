@@ -14,6 +14,8 @@ namespace LineWatch
         [SerializeField] private FanucJointLab fanuc;
 
         private RobotWaypointSet source;
+        private CellCommandGate cellGate;
+        private void Awake() { cellGate = new CellCommandGate(this); }
         private ScaraJointLab scaraOwner;
         private FanucJointLab fanucOwner;
         private readonly Pose[] targets = new Pose[4];
@@ -26,6 +28,7 @@ namespace LineWatch
         public RunState State { get; private set; }
         public int StepIndex { get; private set; }
         public string LastError { get; private set; }
+        public string LastAcknowledgedFaultReason { get; private set; }
         public int LastArrivedStepIndex { get; private set; } = -1;
         public Pose LastArrivalPose { get; private set; }
         public bool IsBusy => State == RunState.Running || State == RunState.Acting;
@@ -76,12 +79,63 @@ namespace LineWatch
         public bool TryResume(out string error)
         {
             if (!CanRequest(out error)) return false;
+            return Resume(out error);
+        }
+
+        internal bool TryResumeFromCell(CellRunController owner, out string error)
+        {
+            if (owner == null || owner.ControlledSequence != this || !cellGate.IsManagedBy(owner))
+            { error = "이 경로를 인계받은 셀 관리자만 재개할 수 있습니다."; return false; }
+            if (!cellGate.CanIssue(this, out error)) return false;
+            return Resume(out error);
+        }
+
+        // Read-only preparation. Cell Start/Resume checks this before changing its state;
+        // execution validates again against the latest joints/program before dispatch.
+        internal bool TryValidateResume(out string error)
+        {
+            if (!CanReadRequest(out error)) return false;
             if (State != RunState.Paused && State != RunState.Faulted) { error = "중단된 순서가 없습니다."; return false; }
             if (!SameProgram()) { error = "경유점이나 로봇 연결이 바뀌었습니다. 처음부터 시작하세요."; return false; }
             if (!AtRest(scaraOwner, fanucOwner)) { error = "현재 수동 이동을 정지한 뒤 재개하세요."; return false; }
             if (!CheckTransport(out error)) return false;
             if (IsPickPlace && GripCount == 0 && !transportGripper.TryCheckPlannedGrip(transportItem, targets[1], out error)) return false;
             if (!Preflight(scaraOwner, fanucOwner, targets, StepIndex, out error)) return false;
+            return true;
+        }
+
+        // Cell recovery preserves the saved step and action counts. A pick/place program
+        // can be acknowledged before its grip or while the same item is still held.
+        internal bool CanAcknowledgeFault(CellRunController owner, out string error)
+        {
+            if (!CanReadRequest(out error)) return false;
+            if (State != RunState.Faulted || owner == null || !owner.isActiveAndEnabled || !owner.IsFaulted ||
+                !cellGate.IsManagedBy(owner) || owner.ControlledSequence != this)
+            { error = "셀이 인계받은 고장 경로만 공통 해제할 수 있습니다."; return false; }
+            if (IsPickPlace)
+            {
+                bool beforeGrip = GripCount == 0 && ReleaseCount == 0 && StepIndex >= 0 && StepIndex <= 1;
+                bool holding = GripCount == 1 && ReleaseCount == 0 && StepIndex >= 1 && StepIndex <= 3;
+                if (!beforeGrip && !holding)
+                { error = "저장 단계와 집기/놓기 횟수가 복구 범위와 맞지 않습니다. 놓기 완료 후 복구는 별도 지원이 필요합니다."; return false; }
+                if (!CheckTransport(out error)) return false;
+            }
+            if (!SameProgram()) { error = "저장된 경유점과 로봇 연결을 원상 복원하세요."; return false; }
+            return true;
+        }
+
+        // Only the coordinator calls this after all paths/FK and the final tracker check
+        // succeed. No callbacks, dispatch or action counters change during the commits.
+        internal void AcknowledgeFaultFromCell()
+        {
+            LastAcknowledgedFaultReason = LastError;
+            LastError = null;
+            State = RunState.Paused;
+        }
+
+        private bool Resume(out string error)
+        {
+            if (!TryValidateResume(out error)) return false;
             if (!Dispatch(scaraOwner, fanucOwner, targets[StepIndex], StepIndex, out error)) return false;
             if (scaraOwner != null) scaraGeometry = scaraOwner.Geometry;
             ownedVersion = Version; LastError = null; State = RunState.Running;
@@ -122,6 +176,12 @@ namespace LineWatch
         }
 
         private bool CanRequest(out string error)
+        {
+            if (!cellGate.CanIssue(null, out error)) return false;
+            return CanReadRequest(out error);
+        }
+
+        private bool CanReadRequest(out string error)
         {
             error = null;
             if (!Application.isPlaying || !IsReady) { error = "Play 상태와 경유점·로봇 연결을 확인하세요."; return false; }
@@ -227,11 +287,11 @@ namespace LineWatch
             return error == null;
         }
 
-        private static bool Dispatch(ScaraJointLab s, FanucJointLab f, Pose target, int index, out string error)
+        private bool Dispatch(ScaraJointLab s, FanucJointLab f, Pose target, int index, out string error)
         {
-            if (s != null) return s.TryMoveTcp(target.position, Yaw(target.rotation), ScaraJointLab.IkSelection.PositiveElbow,
-                index == 0 ? ScaraJointLab.MotionMode.Joint : ScaraJointLab.MotionMode.Linear, out _, out error);
-            return f.TryMoveTcp(target.position, target.rotation, FanucJointLab.IkSeedPolicy.CurrentThenFixed, out _, out error);
+            if (s != null) return s.TryMoveTcpFromSequence(target.position, Yaw(target.rotation), ScaraJointLab.IkSelection.PositiveElbow,
+                index == 0 ? ScaraJointLab.MotionMode.Joint : ScaraJointLab.MotionMode.Linear, this, out _, out error);
+            return f.TryMoveTcpFromSequence(target.position, target.rotation, FanucJointLab.IkSeedPolicy.CurrentThenFixed, this, out _, out error);
         }
 
         private bool ModelAligned(out string error)

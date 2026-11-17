@@ -37,6 +37,7 @@ namespace LineWatch.Editor
             box.Add(row);
             var state = new Label { name = "waypoint-state" }; state.style.whiteSpace = WhiteSpace.Normal; box.Add(state);
             var error = new HelpBox("", HelpBoxMessageType.Warning) { name = "waypoint-error" }; box.Add(error);
+            var cellLock = new HelpBox("", HelpBoxMessageType.Info) { name = "waypoint-cell-lock" }; box.Add(cellLock);
             box.Add(new HelpBox("SCARA는 첫 접근까지 관절 이동, 이후 직선 이동입니다. FANUC는 관절 이동이며 TCP 직선·방향 유지를 보장하지 않습니다.", HelpBoxMessageType.Info));
             void Refresh()
             {
@@ -46,9 +47,14 @@ namespace LineWatch.Editor
                 bool running = sequence.IsBusy;
                 route.text = sequence.IsPickPlace ? "접근 → 작업/집기 → 상승 → 퇴피/놓기" : "접근 → 작업 → 상승 → 퇴피 · 집기 동작 없음";
                 bool paused = sequence.State == RobotWaypointSequence.RunState.Paused || sequence.State == RobotWaypointSequence.RunState.Faulted;
-                start.SetEnabled(playing && clock && sequence.IsReady && !running);
+                bool manual = CellRunControllerEditor.ManualAllowed(sequence, out var lockReason);
+                var gripper = sequence.GetComponent<RobotGripper>();
+                bool holdingCycle = sequence.IsPickPlace && gripper != null && gripper.HeldItem != null;
+                start.SetEnabled(playing && clock && sequence.IsReady && !running && manual && !holdingCycle);
                 stop.SetEnabled(playing && running);
-                resume.SetEnabled(playing && clock && sequence.IsReady && paused);
+                resume.SetEnabled(playing && clock && sequence.IsReady && paused && manual);
+                cellLock.text = lockReason ?? "";
+                cellLock.style.display = playing && !manual ? DisplayStyle.Flex : DisplayStyle.None;
                 string status = !playing ? "Play 대기" : sequence.State == RobotWaypointSequence.RunState.Idle ? "대기"
                     : sequence.State == RobotWaypointSequence.RunState.Completed ? "4/4 완료"
                     : sequence.IsBusy ? clock ? "실행 중" : "에디터/시간 일시정지"

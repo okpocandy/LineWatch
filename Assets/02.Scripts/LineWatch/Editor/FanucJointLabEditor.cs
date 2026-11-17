@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine;
@@ -116,6 +117,7 @@ namespace LineWatch.Editor
             root.Add(controls);
             var states = new Label[6];
             var errors = new string[6];
+            var manualButtons = new List<Button>();
             for (int i = 0; i < 6; i++)
             {
                 int index = i;
@@ -130,9 +132,11 @@ namespace LineWatch.Editor
                 angle.style.width = 66;
                 row.Add(angle);
                 angle.RegisterValueChangedCallback(_ => errors[index] = null);
-                AddButton(row, "이동", () => errors[index] = lab.MoveJoint(index, angle.value) ? null : "요청 거부: 유한한 값과 허용 범위를 확인하세요.");
-                AddButton(row, "0° 복귀", () => { lab.MoveJoint(index, 0f); errors[index] = null; });
-                AddButton(row, "정지", () => lab.StopJoint(index));
+                var moveJoint = AddButton(row, "이동", () => errors[index] = lab.MoveJoint(index, angle.value) ? null : "요청 거부: 유한한 값과 허용 범위를 확인하세요.");
+                moveJoint.name = "fanuc-joint-move-" + i; manualButtons.Add(moveJoint);
+                var home = AddButton(row, "0° 복귀", () => { lab.MoveJoint(index, 0f); errors[index] = null; });
+                home.name = "fanuc-joint-home-" + i; manualButtons.Add(home);
+                AddButton(row, "정지", () => lab.StopJoint(index)).name = "fanuc-joint-stop-" + i;
                 controls.Add(row);
                 states[i] = new Label();
                 states[i].style.whiteSpace = WhiteSpace.Normal;
@@ -141,8 +145,8 @@ namespace LineWatch.Editor
             var all = new VisualElement();
             all.style.flexDirection = FlexDirection.Row;
             all.style.marginTop = 12;
-            AddButton(all, "전체 정지", lab.StopAll);
-            AddButton(all, "전체 0° 복귀", lab.HomeAll);
+            AddButton(all, "전체 정지", lab.StopAll).name = "fanuc-all-stop";
+            var homeAll = AddButton(all, "전체 0° 복귀", lab.HomeAll); homeAll.name = "fanuc-all-home"; manualButtons.Add(homeAll);
             controls.Add(all);
             var geometrySettings = new Foldout { text = "FK 홈 기하 입력 (m·Quaternion·로컬 축)", value = false };
             geometrySettings.Add(new PropertyField(settingsObject.FindProperty("geometry"), "저장한 홈 기하"));
@@ -159,10 +163,14 @@ namespace LineWatch.Editor
                 if (lab == null) return;
                 bool playing = Application.isPlaying;
                 bool paused = EditorApplication.isPaused;
-                controls.SetEnabled(playing && !paused && lab.IsReady);
+                bool manual = CellRunControllerEditor.ManualAllowed(lab, out var lockReason);
+                controls.SetEnabled(playing);
+                foreach (var button in manualButtons) button.SetEnabled(playing && !paused && Time.timeScale > 0f && lab.IsReady && manual);
                 help.text = !playing ? "상단 ▶ Play 후 각 축의 목표 각도를 입력하고 이동을 누르세요."
                     : paused ? "일시정지 중에도 목표 미리보기는 가능합니다. 관절 조작은 상단 Ⅱ 버튼을 해제하세요."
+                    : Time.timeScale <= 0f ? "시간 배율이 0입니다. 정지는 계속 가능합니다."
                     : !lab.IsReady ? "관절·TCP 연결 또는 축 활성 상태를 확인하세요."
+                    : !manual ? lockReason
                     : "IK 목표 관절 이동 또는 기존 축별 조작을 사용하세요. 새 목표 입력은 이동 버튼을 누르기 전까지 미리보기입니다.";
                 bool manualMoving = false;
                 foreach (var joint in lab.Joints) if (joint != null) manualMoving |= joint.IsMoving;
@@ -224,7 +232,7 @@ namespace LineWatch.Editor
                 bool success = lab.TryPreviewTcp(goalPosition.value * .001f, new Quaternion(r.x, r.y, r.z, r.w),
                     (FanucJointLab.IkSeedPolicy)seedPolicy.index, out var preview, out var error);
                 var result = preview.Result;
-                move.SetEnabled(success && ready && !EditorApplication.isPaused && Time.timeScale > 0f);
+                move.SetEnabled(success && ready && !EditorApplication.isPaused && Time.timeScale > 0f && CellRunControllerEditor.ManualAllowed(lab, out _));
                 ikState.text = success
                     ? $"계산 성공 · 위치 오차 {result.PositionErrorMetres.Value * 1000f:F4} mm · 전체 회전 오차 {result.RotationErrorDegrees.Value:F5}°"
                     : result != null && result.PositionErrorMetres.HasValue
@@ -255,12 +263,13 @@ namespace LineWatch.Editor
             $"{label} · RobotFrame\n위치 X {positionMetres.x * 1000f:F3} · Y {positionMetres.y * 1000f:F3} · Z {positionMetres.z * 1000f:F3} mm\n"
             + $"방향 q(x,y,z,w) = ({rotation.x:F6}, {rotation.y:F6}, {rotation.z:F6}, {rotation.w:F6})";
 
-        private static void AddButton(VisualElement parent, string text, System.Action action)
+        private static Button AddButton(VisualElement parent, string text, System.Action action)
         {
             var button = new Button(action) { text = text };
             button.style.flexGrow = 1;
             button.style.minHeight = 25;
             parent.Add(button);
+            return button;
         }
     }
 }

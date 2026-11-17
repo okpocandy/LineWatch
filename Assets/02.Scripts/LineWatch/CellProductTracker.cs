@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -15,9 +16,12 @@ namespace LineWatch
         private readonly ProductFlow flow = new ProductFlow();
         private readonly Dictionary<string, GrippableItem> products = new Dictionary<string, GrippableItem>();
         private RobotGripper scaraGripper, fanucGripper;
+        private CellCommandGate cellGate;
 
         public bool IsFaulted { get; private set; }
         public string FaultReason { get; private set; }
+        public string LastAcknowledgedFaultReason { get; private set; }
+        public event Action<string> Faulted;
         public int Count => flow.Count;
         public string InputProductId => flow.InputProductId;
         public string ScaraProductId => flow.ScaraProductId;
@@ -31,6 +35,7 @@ namespace LineWatch
 
         private void Awake()
         {
+            cellGate = new CellCommandGate(this);
             if (layout == null) return;
             if (layout.Scara != null) scaraGripper = layout.Scara.GetComponent<RobotGripper>();
             if (layout.Fanuc != null) fanucGripper = layout.Fanuc.GetComponent<RobotGripper>();
@@ -44,6 +49,7 @@ namespace LineWatch
 
         public bool TryRegister(GrippableItem item, string id, ProductDestination destination, out string error)
         {
+            if (!cellGate.CanIssue(null, out error)) return false;
             if (!Ready(out error)) return false;
             if (item == null || !item.IsReady || item.Owner != null || item.IsTracked)
             { error = "활성 상태의 미보유·미등록 상품이 필요합니다."; return false; }
@@ -58,6 +64,7 @@ namespace LineWatch
         public bool TryFeedNext(out ProductRecord record, out string error)
         {
             record = null;
+            if (!cellGate.CanIssue(null, out error)) return false;
             if (!Ready(out error)) return false;
             if (flow.InputProductId != null) { error = "투입 지점 사용 중: 대기열을 유지합니다."; return false; }
             var waiting = flow.WaitingSnapshot();
@@ -70,6 +77,7 @@ namespace LineWatch
 
         public bool TryRemove(string id, ProductLocation expected, out string error)
         {
+            if (!cellGate.CanIssue(null, out error)) return false;
             if (!Ready(out error)) return false;
             if (!TryGetItem(id, out var item) || !item.IsReady || item.Owner != null)
             { error = "미보유 상태의 실제 상품이 필요합니다."; return false; }
@@ -118,20 +126,56 @@ namespace LineWatch
 
         private void LateUpdate()
         {
-            if (IsFaulted) return;
-            if (products.Count > 0 && !Wired) { Fault("셀의 추적 연결이 바뀌었습니다."); return; }
+            if (IsFaulted || products.Count == 0) return;
+            if (!TryCheckPhysicalState(out var error)) Fault(error);
+        }
+
+        // Read the same physical evidence during normal monitoring and explicit recovery.
+        // This query never clears a fault or changes the registry, owners or slot/FIFO data.
+        internal bool TryCheckPhysicalState(out string error)
+        {
+            error = null;
+            if (!isActiveAndEnabled || !Wired) { error = "셀의 상품 추적 연결이 유효하지 않습니다."; return false; }
             foreach (var pair in products)
             {
                 flow.TryGet(pair.Key, out var record);
-                if (Terminal(record.Location)) continue;
                 var item = pair.Value;
-                if (item == null || !item.IsReady) { Fault("상품 " + record.Id + "의 실제 물체가 유효하지 않습니다."); return; }
+                if (Terminal(record.Location))
+                {
+                    if (item != null && item.Owner != null) { error = "완료/제거 상품 " + record.Id + "이 실제로 보유되어 있습니다."; return false; }
+                    continue;
+                }
+                if (item == null || !item.IsReady) { error = "상품 " + record.Id + "의 실제 물체가 유효하지 않습니다."; return false; }
+                if (item.ProductTracker != this || item.ProductId != record.Id)
+                { error = "상품 " + record.Id + "의 ID/실제 물체 대응이 다릅니다."; return false; }
                 var owner = record.Location == ProductLocation.Scara ? scaraGripper : record.Location == ProductLocation.Fanuc ? fanucGripper : null;
                 if (item.Owner != owner || owner != null && owner.HeldItem != item)
-                { Fault("상품 " + record.Id + "의 보유 기록과 실제 집게가 다릅니다."); return; }
+                { error = "상품 " + record.Id + "의 보유 기록과 실제 집게가 다릅니다."; return false; }
                 var station = record.Location == ProductLocation.Input ? layout.InputStop : record.Location == ProductLocation.Handoff ? layout.HandoffPoint : null;
-                if (station != null && !At(item, station)) { Fault("상품 " + record.Id + "이 기록된 정지점에서 벗어났습니다."); return; }
+                if (station != null && !At(item, station)) { error = "상품 " + record.Id + "이 기록된 정지점에서 벗어났습니다."; return false; }
             }
+            return true;
+        }
+
+        // The coordinator validates both robots and the saved program before this final
+        // physical check. No event is emitted between the tracker and cell latch commits.
+        internal bool TryAcknowledgeFault(CellRunController requester, out string error)
+        {
+            error = null;
+            if (!Application.isPlaying || Time.timeScale <= 0f || requester == null || !requester.isActiveAndEnabled ||
+                !cellGate.IsManagedBy(requester) || !requester.IsFaulted)
+            { error = "활성 셀의 명시적 고장 해제 경로만 상품 추적 고장을 해제할 수 있습니다."; return false; }
+#if UNITY_EDITOR
+            if (UnityEditor.EditorApplication.isPaused) { error = "에디터 일시정지를 해제하세요."; return false; }
+#endif
+            if (!TryCheckPhysicalState(out error)) return false;
+            if (IsFaulted)
+            {
+                LastAcknowledgedFaultReason = FaultReason;
+                FaultReason = null;
+                IsFaulted = false;
+            }
+            return true;
         }
 
         private bool Ready(out string error)
@@ -167,6 +211,7 @@ namespace LineWatch
             IsFaulted = true; FaultReason = reason;
             if (scaraGripper != null) scaraGripper.Stop();
             if (fanucGripper != null) fanucGripper.Stop();
+            Faulted?.Invoke(FaultReason);
         }
         private void OnDisable() { if (Application.isPlaying && flow.Count > 0) Fault("상품 추적 관리자가 비활성화되었습니다."); }
     }

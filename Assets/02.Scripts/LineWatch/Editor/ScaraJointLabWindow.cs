@@ -29,7 +29,7 @@ namespace LineWatch.Editor
             var lab = Object.FindFirstObjectByType<ScaraJointLab>();
             if (lab == null)
             {
-                rootVisualElement.Add(new HelpBox("RobotLab 씬을 열고 아래 버튼으로 다시 연결하세요.", HelpBoxMessageType.Info));
+                rootVisualElement.Add(new HelpBox("LineWatch 씬을 열고 아래 버튼으로 다시 연결하세요.", HelpBoxMessageType.Info));
                 rootVisualElement.Add(new Button(RefreshLab) { text = "씬에서 SCARA 다시 찾기" });
                 return;
             }

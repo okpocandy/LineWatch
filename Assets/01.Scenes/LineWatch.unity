@@ -566,6 +566,7 @@ GameObject:
   - component: {fileID: 247819125}
   - component: {fileID: 247819124}
   - component: {fileID: 247819126}
+  - component: {fileID: 247819127}
   m_Layer: 0
   m_Name: LineWatchCell
   m_TagString: Untagged
@@ -642,6 +643,18 @@ MonoBehaviour:
   initialProduct: {fileID: 1848734074}
   initialProductId: P-000001
   initialDestination: 0
+--- !u!114 &247819127
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 247819123}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0b895ff677a461f4aa904e1a0c0cc0ff, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::LineWatch.CellRunController
 --- !u!1 &278504896
 GameObject:
   m_ObjectHideFlags: 0

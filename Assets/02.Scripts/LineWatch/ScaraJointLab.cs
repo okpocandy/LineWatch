@@ -23,6 +23,8 @@ namespace LineWatch
         [SerializeField] private float fkHomeToolYawDegrees;
 
         private ScaraMotionPlanner.Plan activePlan;
+        private CellCommandGate cellGate;
+        private void Awake() { cellGate = new CellCommandGate(this); }
         private Vector4 plannedSpeeds;
         private int segmentIndex;
         private float segmentElapsed;
@@ -57,7 +59,8 @@ namespace LineWatch
         public Transform RobotFrame => robotFrame;
         public Transform Tcp => tcp;
         public Vector3 ActualTcpPosition => robotFrame.InverseTransformPoint(tcp.position);
-        public float ActualTcpYawDegrees => Vector3.SignedAngle(robotFrame.forward, tcp.forward, robotFrame.up);
+        public float ActualTcpYawDegrees => Mathf.Atan2(Vector3.Dot(robotFrame.up, Vector3.Cross(robotFrame.forward, tcp.forward)),
+            Vector3.Dot(robotFrame.forward, tcp.forward)) * Mathf.Rad2Deg;
         public bool IsReady => isActiveAndEnabled && axis1 != null && axis1.isActiveAndEnabled &&
             axis2 != null && axis2.isActiveAndEnabled && axis3 != null && axis3.isActiveAndEnabled &&
             axis4 != null && axis4.isActiveAndEnabled && robotFrame != null && tcp != null;
@@ -193,9 +196,18 @@ namespace LineWatch
 
         public bool TryMoveTcp(Vector3 targetMetres, float yawDegrees, IkSelection selection, MotionMode motion,
             out IK.Solution selected, out string error)
+            => MoveTcp(targetMetres, yawDegrees, selection, motion, null, out selected, out error);
+
+        internal bool TryMoveTcpFromSequence(Vector3 targetMetres, float yawDegrees, IkSelection selection, MotionMode motion,
+            RobotWaypointSequence requester, out IK.Solution selected, out string error)
+            => MoveTcp(targetMetres, yawDegrees, selection, motion, requester, out selected, out error);
+
+        private bool MoveTcp(Vector3 targetMetres, float yawDegrees, IkSelection selection, MotionMode motion,
+            RobotWaypointSequence requester, out IK.Solution selected, out string error)
         {
             selected = default;
             error = null;
+            if (!cellGate.CanIssue(requester, out error)) return false;
 #if UNITY_EDITOR
             if (UnityEditor.EditorApplication.isPaused)
             {
@@ -271,6 +283,7 @@ namespace LineWatch
 
         public bool MoveJoint(int index, float target)
         {
+            if (!cellGate.CanIssue(null, out _)) return false;
             if (!Application.isPlaying || !IsReady) return false;
             bool allowed;
             switch (index)
@@ -313,6 +326,7 @@ namespace LineWatch
 
         public void HomeAll()
         {
+            if (!cellGate.CanIssue(null, out _)) return;
             if (!Application.isPlaying || !IsReady) return;
             if (activePlan != null) StopAll();
             LastMotionError = null;

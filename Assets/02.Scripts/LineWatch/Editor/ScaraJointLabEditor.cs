@@ -51,6 +51,7 @@ namespace LineWatch.Editor
             var rotary = new[] { lab.Axis1, lab.Axis2, null, lab.Axis4 };
             var states = new Label[4];
             var errors = new string[4];
+            var manualButtons = new List<Button>();
             for (int i = 0; i < 4; i++)
             {
                 int index = i;
@@ -67,10 +68,12 @@ namespace LineWatch.Editor
                 targetValue.style.width = 76;
                 row.Add(targetValue);
                 targetValue.RegisterValueChangedCallback(_ => errors[index] = null);
-                AddButton(row, "이동", () => errors[index] = lab.MoveJoint(index, targetValue.value)
+                var move = AddButton(row, "이동", () => errors[index] = lab.MoveJoint(index, targetValue.value)
                     ? null : "요청 거부: 단위·허용 범위·유효한 숫자인지 확인하세요.");
-                AddButton(row, "홈 복귀", () => { lab.MoveJoint(index, 0f); errors[index] = null; });
-                AddButton(row, "정지", () => lab.StopJoint(index));
+                move.name = "scara-joint-move-" + i; manualButtons.Add(move);
+                var home = AddButton(row, "홈 복귀", () => { lab.MoveJoint(index, 0f); errors[index] = null; });
+                home.name = "scara-joint-home-" + i; manualButtons.Add(home);
+                AddButton(row, "정지", () => lab.StopJoint(index)).name = "scara-joint-stop-" + i;
                 controls.Add(row);
                 states[i] = new Label();
                 states[i].style.whiteSpace = WhiteSpace.Normal;
@@ -79,8 +82,8 @@ namespace LineWatch.Editor
             var all = new VisualElement();
             all.style.flexDirection = FlexDirection.Row;
             all.style.marginTop = 12;
-            AddButton(all, "전체 정지", lab.StopAll);
-            AddButton(all, "전체 홈 복귀", lab.HomeAll);
+            AddButton(all, "전체 정지", lab.StopAll).name = "scara-all-stop";
+            var homeAll = AddButton(all, "전체 홈 복귀", lab.HomeAll); homeAll.name = "scara-all-home"; manualButtons.Add(homeAll);
             controls.Add(all);
             var calculatedState = new Label { name = "scara-fk-calculated" };
             var actualState = new Label { name = "scara-fk-actual" };
@@ -109,11 +112,14 @@ namespace LineWatch.Editor
             {
                 if (lab == null) return;
                 bool playing = Application.isPlaying;
-                bool paused = EditorApplication.isPaused;
-                controls.SetEnabled(playing && !paused && lab.IsReady);
+                bool paused = EditorApplication.isPaused || Time.timeScale <= 0f;
+                bool manual = CellRunControllerEditor.ManualAllowed(lab, out var lockReason);
+                controls.SetEnabled(playing);
+                foreach (var button in manualButtons) button.SetEnabled(playing && !paused && lab.IsReady && manual);
                 help.text = !playing ? "상단 ▶ Play 후 목표값을 입력하고 이동을 누르세요."
-                    : paused ? "일시정지 중입니다. 상단 Ⅱ 버튼을 해제하세요."
+                    : paused ? "에디터 일시정지 또는 시간 배율을 해제하세요. 정지는 계속 가능합니다."
                     : !lab.IsReady ? "네 축과 RobotFrame·TCP 연결을 확인하세요."
+                    : !manual ? lockReason
                     : "IK 목표 이동 또는 관절별 수동 조작을 사용하세요. 아래 FK 진단은 현재 관절값을 읽습니다.";
                 for (int i = 0; i < states.Length; i++)
                 {
@@ -221,8 +227,9 @@ namespace LineWatch.Editor
                 if (lab == null) { root.SetEnabled(false); return; }
                 bool ready = Application.isPlaying && lab.IsReady;
                 bool canMove = ready && !EditorApplication.isPaused && Time.timeScale > 0f;
+                bool manual = CellRunControllerEditor.ManualAllowed(lab, out var lockReason);
                 inputs.SetEnabled(canMove);
-                stop.SetEnabled(canMove);
+                stop.SetEnabled(Application.isPlaying);
                 move.SetEnabled(false);
                 feedback.style.display = DisplayStyle.None;
                 if (!ready)
@@ -241,10 +248,10 @@ namespace LineWatch.Editor
                 if (result != null && result.Success)
                     foreach (var candidate in result.Solutions) candidates.text += "\n" + FormatIkSolution(candidate);
                 chosen.text = valid ? "선택 예정: " + FormatIkSolution(solution) : "선택 예정: 없음";
-                move.SetEnabled(canMove && valid);
-                if (!valid || solution.IsSingular || !canMove)
+                move.SetEnabled(canMove && valid && manual);
+                if (!valid || solution.IsSingular || !canMove || !manual)
                 {
-                    feedback.text = !canMove ? "일시정지를 해제한 후 이동하세요."
+                    feedback.text = !manual ? lockReason : !canMove ? "일시정지를 해제한 후 이동하세요."
                         : !valid ? error : "특이 자세: 굽힘 분기가 합쳐지는 자세입니다. 속도 제어·회피 경로는 지원하지 않습니다.";
                     feedback.style.display = DisplayStyle.Flex;
                 }
@@ -271,12 +278,13 @@ namespace LineWatch.Editor
             return $"{title} (로봇 기준)\nX {mm.x:F2} / Y {mm.y:F2} / Z {mm.z:F2} mm · 수평 {yawDegrees:F2}°";
         }
 
-        private static void AddButton(VisualElement parent, string text, System.Action action)
+        private static Button AddButton(VisualElement parent, string text, System.Action action)
         {
             var button = new Button(action) { text = text };
             button.style.flexGrow = 1;
             button.style.minHeight = 26;
             parent.Add(button);
+            return button;
         }
     }
 }

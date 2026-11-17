@@ -10,6 +10,7 @@ namespace LineWatch
         [SerializeField] private float maximumMetres = 0.15f;
 
         private Vector3 homePosition;
+        private CellCommandGate cellGate;
         internal bool IsCoordinated { get; private set; }
 
         public float CurrentPosition { get; private set; }
@@ -22,6 +23,7 @@ namespace LineWatch
 
         private void Awake()
         {
+            cellGate = new CellCommandGate(this);
             homePosition = transform.localPosition;
         }
 
@@ -30,6 +32,7 @@ namespace LineWatch
 
         public bool MoveTo(float metres)
         {
+            if (!cellGate.CanIssue(null, out _)) return false;
             if (!CanMoveTo(metres)) return false;
             IsCoordinated = false;
             TargetPosition = metres;

@@ -16,7 +16,7 @@ using UnityEngine.UIElements;
 public static class VerifyCellControls
 {
     private static readonly string[] DataSources = {
-        "Assets/01.Scenes/LineWatch.unity", "Assets/01.Scenes/RobotLab.unity",
+        "Assets/01.Scenes/LineWatch.unity",
         "Assets/03.Prefabs/ScaraRobot_Work.prefab", "Assets/03.Prefabs/FanucRobot_Work.prefab",
         "Assets/03.Prefabs/GripTrialPart.prefab", "Assets/03.Prefabs/HandoffTrialPart.prefab",
         "Assets/04.ScriptableObject/ScaraCellHandoff.asset", "Assets/04.ScriptableObject/FanucCellHandoff.asset",

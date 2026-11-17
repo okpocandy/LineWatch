@@ -23,6 +23,8 @@ namespace LineWatch
         }
 
         private TcpMotion activeMotion;
+        private CellCommandGate cellGate;
+        private void Awake() { cellGate = new CellCommandGate(this); }
         public bool IsTcpMoving => activeMotion != null;
         public string LastMotionError { get; private set; }
         public uint CommandVersion { get; private set; }
@@ -202,9 +204,18 @@ namespace LineWatch
 
         public bool TryMoveTcp(Vector3 targetMetres, Quaternion targetRotation, IkSeedPolicy policy,
             out IkPreview preview, out string error)
+            => MoveTcp(targetMetres, targetRotation, policy, null, out preview, out error);
+
+        internal bool TryMoveTcpFromSequence(Vector3 targetMetres, Quaternion targetRotation, IkSeedPolicy policy,
+            RobotWaypointSequence requester, out IkPreview preview, out string error)
+            => MoveTcp(targetMetres, targetRotation, policy, requester, out preview, out error);
+
+        private bool MoveTcp(Vector3 targetMetres, Quaternion targetRotation, IkSeedPolicy policy,
+            RobotWaypointSequence requester, out IkPreview preview, out string error)
         {
             preview = default;
             error = null;
+            if (!cellGate.CanIssue(requester, out error)) return false;
 #if UNITY_EDITOR
             if (UnityEditor.EditorApplication.isPaused)
             {
@@ -336,6 +347,7 @@ namespace LineWatch
 
         public bool MoveJoint(int index, float degrees)
         {
+            if (!cellGate.CanIssue(null, out _)) return false;
             if (!Application.isPlaying || !IsReady || index < 0 || index >= joints.Length || !joints[index].CanMoveTo(degrees)) return false;
             if (activeMotion != null) StopAll();
             LastMotionError = null;
@@ -353,6 +365,7 @@ namespace LineWatch
 
         public void HomeAll()
         {
+            if (!cellGate.CanIssue(null, out _)) return;
             if (!Application.isPlaying || !IsReady) return;
             foreach (var joint in joints) if (!joint.CanMoveTo(0f)) return;
             if (activeMotion != null) StopAll();

@@ -15,7 +15,7 @@ public static class VerifyCellProducts
 {
     private const string ScenePath = "Assets/01.Scenes/LineWatch.unity";
     private static readonly string[] Sources = {
-        ScenePath, "Assets/01.Scenes/RobotLab.unity", "ProjectSettings/ProjectSettings.asset", "ProjectSettings/EditorBuildSettings.asset",
+        ScenePath, "ProjectSettings/ProjectSettings.asset", "ProjectSettings/EditorBuildSettings.asset",
         "Assets/03.Prefabs/ScaraRobot_Work.prefab", "Assets/03.Prefabs/FanucRobot_Work.prefab", "Assets/03.Prefabs/GripTrialPart.prefab", "Assets/03.Prefabs/HandoffTrialPart.prefab",
         "Assets/04.ScriptableObject/ScaraCellHandoff.asset", "Assets/04.ScriptableObject/FanucCellHandoff.asset",
         "Assets/02.Scripts/LineWatch/GrippableItem.cs", "Assets/02.Scripts/LineWatch/RobotGripper.cs",

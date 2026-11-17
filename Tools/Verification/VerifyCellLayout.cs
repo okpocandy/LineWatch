@@ -21,7 +21,7 @@ public static class VerifyCellLayout
     private const string FanucData = "Assets/04.ScriptableObject/FanucCellHandoff.asset";
     private const string ConveyorModel = "Packages/io.realvirtual.starter/Assets/3DPrefabs/3DModels/ConveyorSmall.fbx";
     private static readonly string[] Protected = {
-        "Assets/01.Scenes/RobotLab.unity", "ProjectSettings/ProjectSettings.asset", "ProjectSettings/EditorBuildSettings.asset",
+        "ProjectSettings/ProjectSettings.asset", "ProjectSettings/EditorBuildSettings.asset",
         ScaraPrefab, FanucPrefab, PartPrefab, "Assets/03.Prefabs/GripTrialPart.prefab",
         "Assets/04.ScriptableObject/ScaraLabWaypoints.asset", "Assets/04.ScriptableObject/FanucLabWaypoints.asset",
         "Assets/02.Scripts/LineWatch/GrippableItem.cs", "Assets/02.Scripts/LineWatch/RobotGripper.cs",

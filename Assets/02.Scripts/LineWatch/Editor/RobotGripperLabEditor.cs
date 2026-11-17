@@ -56,17 +56,22 @@ namespace LineWatch.Editor
             var state = new Label { name = "gripper-state" }; box.Add(state);
             var alignment = new Label { name = "gripper-alignment" }; box.Add(alignment);
             var error = new HelpBox("", HelpBoxMessageType.Warning) { name = "gripper-error" }; box.Add(error);
+            var cellLock = new HelpBox("", HelpBoxMessageType.Info) { name = "gripper-cell-lock" }; box.Add(cellLock);
             box.Add(new HelpBox("자동: 준비 → 시작 → 작업점 집기 → 상승/퇴피 → 놓기. 정지는 보유를 유지하고 재개는 남은 구간만 수행합니다. 놓은 물체는 그 위치에 유지됩니다.", HelpBoxMessageType.Info));
             void Refresh()
             {
                 if (lab == null || lab.Gripper == null) return;
                 var g = lab.Gripper; var target = lab.TrialItem;
                 bool playing = EditorApplication.isPlaying, clock = !EditorApplication.isPaused && Time.timeScale > 0f;
-                bool ready = playing && clock && lab.IsReady && g.IsStopped;
+                bool manual = CellRunControllerEditor.ManualAllowed(g, out var lockReason);
+                bool ready = playing && clock && lab.IsReady && g.IsStopped && manual;
+                cellLock.text = lockReason ?? "";
+                cellLock.style.display = playing && !manual ? DisplayStyle.Flex : DisplayStyle.None;
                 bool busy = sequence != null && sequence.IsBusy;
-                autoStart.SetEnabled(ready && sequence != null && !busy && target != null && target.Owner == null && g.HeldItem == null);
+                bool sequenceAllowed = sequence != null && CellRunControllerEditor.ManualAllowed(sequence, out _);
+                autoStart.SetEnabled(ready && sequenceAllowed && !busy && target != null && target.Owner == null && g.HeldItem == null);
                 autoStop.SetEnabled(playing && busy);
-                autoResume.SetEnabled(ready && sequence != null && sequence.IsPickPlace &&
+                autoResume.SetEnabled(ready && sequenceAllowed && sequence.IsPickPlace &&
                     (sequence.State == RobotWaypointSequence.RunState.Paused || sequence.State == RobotWaypointSequence.RunState.Faulted));
                 autoState.text = !playing ? "Play 대기" : sequence == null || !sequence.IsPickPlace ? "자동 집기 운전 대기"
                     : sequence.State == RobotWaypointSequence.RunState.Completed ? "자동 운전 완료 · 물체 놓기 완료"

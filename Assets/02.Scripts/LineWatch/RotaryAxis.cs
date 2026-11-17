@@ -11,6 +11,7 @@ namespace LineWatch
         [SerializeField] private Vector3 localRotationAxis = Vector3.up;
 
         private Quaternion homeRotation;
+        private CellCommandGate cellGate;
         internal bool IsCoordinated { get; private set; }
 
         public float CurrentPosition { get; private set; }
@@ -25,6 +26,7 @@ namespace LineWatch
 
         private void Awake()
         {
+            cellGate = new CellCommandGate(this);
             homeRotation = transform.localRotation;
         }
 
@@ -33,6 +35,7 @@ namespace LineWatch
 
         public bool MoveTo(float degrees)
         {
+            if (!cellGate.CanIssue(null, out _)) return false;
             if (!CanMoveTo(degrees)) return false;
             IsCoordinated = false;
             TargetPosition = degrees;

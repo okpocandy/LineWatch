@@ -248,7 +248,7 @@ public static class VerifyProductConservation
         : !g.Fanuc.IsTcpMoving && g.Fanuc.Joints.All(j => !j.IsMoving);
     private static async Task Frames(int count) { int frame = Time.frameCount; await Until(() => Time.frameCount - frame >= count); }
     private static async Task Until(Func<bool> condition) { var watch = Stopwatch.StartNew(); while (!condition()) { Require(watch.Elapsed.TotalSeconds < 15, "Verification wait timed out."); await Task.Delay(1); } }
-    private static Dictionary<string, string> Hashes() => new[] { "Assets/01.Scenes/LineWatch.unity", "Assets/01.Scenes/RobotLab.unity", "ProjectSettings/ProjectSettings.asset", "ProjectSettings/EditorBuildSettings.asset",
+    private static Dictionary<string, string> Hashes() => new[] { "Assets/01.Scenes/LineWatch.unity", "ProjectSettings/ProjectSettings.asset", "ProjectSettings/EditorBuildSettings.asset",
         "Assets/03.Prefabs/ScaraRobot_Work.prefab", "Assets/03.Prefabs/FanucRobot_Work.prefab", "Assets/03.Prefabs/GripTrialPart.prefab", "Assets/03.Prefabs/HandoffTrialPart.prefab",
         "Assets/04.ScriptableObject/ScaraCellHandoff.asset", "Assets/04.ScriptableObject/FanucCellHandoff.asset", "Assets/04.ScriptableObject/ScaraLabWaypoints.asset", "Assets/04.ScriptableObject/FanucLabWaypoints.asset" }
         .Concat(Directory.GetFiles("Assets/02.Scripts/LineWatch", "*.cs", SearchOption.AllDirectories)).Distinct().ToDictionary(p => p, Hash);

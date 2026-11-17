@@ -17,6 +17,7 @@ namespace LineWatch
         [SerializeField] private float fingerTravelMetres;
 
         private RobotWaypointSequence sequence;
+        private CellCommandGate cellGate;
         private Vector3 heldPosition, leftHome, rightHome;
         private Quaternion heldRotation;
 
@@ -47,15 +48,17 @@ namespace LineWatch
 
         private void Awake()
         {
+            cellGate = new CellCommandGate(this);
             sequence = GetComponent<RobotWaypointSequence>();
             if (leftFinger != null) leftHome = leftFinger.localPosition;
             if (rightFinger != null) rightHome = rightFinger.localPosition;
         }
 
         internal bool CanOperate(out string error) => CanOperate(null, false, out error);
-        private bool CanOperate(RobotWaypointSequence requester, bool releasing, out string error)
+        private bool CanOperate(RobotWaypointSequence requester, bool releasing, out string error, bool inspectOnly = false)
         {
             error = null;
+            if (!inspectOnly && !cellGate.CanIssue(requester, out error)) return false;
             if (!Application.isPlaying || !IsReady) { error = "Play 상태와 그리퍼·로봇·접촉 기준 연결을 확인하세요."; return false; }
 #if UNITY_EDITOR
             if (UnityEditor.EditorApplication.isPaused) { error = "에디터 일시정지를 해제하세요."; return false; }
@@ -115,7 +118,9 @@ namespace LineWatch
 
         internal bool TryCheckPlannedGrip(GrippableItem item, Pose tcpGoal, out string error)
         {
-            if (!CanOperate(out error)) return false;
+            // Planning reads readiness/alignment only, including while an adopted cell is
+            // paused. Actual Grip/Release still require command admission above.
+            if (!CanOperate(null, false, out error, true)) return false;
             if (HeldItem != null) { error = "보유 물체를 놓거나 기존 운전을 재개하세요."; return false; }
             if (item == null || !item.IsReady || item.Owner != null) { error = "준비된 미보유 물체가 필요합니다."; return false; }
             if (Tcp.IsChildOf(item.transform) || item.transform.IsChildOf(transform)) { error = "로봇 계층에 포함된 물체입니다."; return false; }
