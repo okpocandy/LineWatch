@@ -94,7 +94,7 @@ namespace LineWatch
             { error = $"접촉 기준이 맞지 않습니다. 거리 {positionError * 1000:F3}mm / 방향 {angleError:F3}° (허용 2mm / 0.5°)"; return false; }
             var localPosition = Tcp.InverseTransformPoint(item.Body.position);
             var localRotation = Quaternion.Inverse(Tcp.rotation) * item.Body.rotation;
-            if (!item.TryClaim(this)) { error = "물체의 보유자를 확보하지 못했습니다."; return false; }
+            if (!item.TryClaim(this, out error)) return false;
             HeldItem = item; heldPosition = localPosition; heldRotation = localRotation;
             LastError = null; SetFingers(true);
             return true;
@@ -106,6 +106,7 @@ namespace LineWatch
         {
             if (!CanOperate(requester, true, out error)) return false;
             if (HeldItem == null) { error = "보유한 물체가 없습니다."; return false; }
+            if (!HeldItem.TryAuthorizeRelease(this, out error)) return false;
             ClearHeld(); LastError = null;
             return true;
         }

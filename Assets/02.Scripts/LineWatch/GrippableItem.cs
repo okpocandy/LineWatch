@@ -12,6 +12,9 @@ namespace LineWatch
         private BoxCollider shape;
 
         public RobotGripper Owner { get; private set; }
+        public CellProductTracker ProductTracker { get; private set; }
+        public string ProductId { get; private set; }
+        public bool IsTracked => ProductId != null;
         public Transform GripPoint => gripPoint;
         public Rigidbody Body => body;
         // Transform can lag a Rigidbody pose assignment until the next physics sync.
@@ -45,18 +48,37 @@ namespace LineWatch
 
         private void Awake() { body = GetComponent<Rigidbody>(); shape = GetComponent<BoxCollider>(); }
 
-        internal bool TryClaim(RobotGripper gripper)
+        internal void BindProduct(CellProductTracker tracker, string id) { ProductTracker = tracker; ProductId = id; }
+
+        internal bool TryClaim(RobotGripper gripper, out string error)
         {
-            if (!IsReady || Owner != null || gripper == null) return false;
+            error = null;
+            if (!IsReady || Owner != null || gripper == null) { error = "상품의 보유자를 확보하지 못했습니다."; return false; }
+            if (IsTracked && (ProductTracker == null || !ProductTracker.TryCommitGrip(this, gripper, out error)))
+            { if (error == null) error = "상품 추적 관리자가 유효하지 않습니다."; return false; }
             Owner = gripper;
             return true;
         }
 
-        internal void ClearOwner(RobotGripper gripper) { if (Owner == gripper) Owner = null; }
+        internal bool TryAuthorizeRelease(RobotGripper gripper, out string error)
+        {
+            error = null;
+            if (!IsTracked) return true;
+            if (ProductTracker == null) { error = "상품 추적 관리자가 유효하지 않습니다."; return false; }
+            return ProductTracker.TryCommitRelease(this, gripper, out error);
+        }
+
+        internal void ClearOwner(RobotGripper gripper)
+        {
+            if (Owner != gripper) return;
+            Owner = null;
+            if (ProductTracker != null) ProductTracker.OwnerCleared(this);
+        }
 
         private void OnDisable()
         {
             if (Owner != null) Owner.ItemUnavailable(this);
+            if (ProductTracker != null) ProductTracker.ItemUnavailable(this);
         }
     }
 }
