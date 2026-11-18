@@ -8,7 +8,7 @@ namespace LineWatch
 {
     public sealed class RobotWaypointSequence : MonoBehaviour
     {
-        public enum RunState { Idle, Running, Paused, Faulted, Completed, Acting }
+        public enum RunState { Idle, Running, Paused, Faulted, Completed, Acting, Cancelled }
         [SerializeField] private RobotWaypointSet waypoints;
         [SerializeField] private ScaraJointLab scara;
         [SerializeField] private FanucJointLab fanuc;
@@ -23,8 +23,45 @@ namespace LineWatch
         private ScaraForwardKinematics.Geometry scaraGeometry;
         private RobotGripper transportGripper;
         private GrippableItem transportItem;
+        private string cycleProductId, programName;
+        private readonly List<ProgramRecord> cancellations = new List<ProgramRecord>();
+        private readonly List<ProgramRecord> scenarioResets = new List<ProgramRecord>();
+
+        // Immutable evidence survives a later, separately requested program start.
+        public sealed class ProgramRecord
+        {
+            public string Reason { get; }
+            public string ProgramName { get; }
+            public string ProductId { get; }
+            public RunState PreviousState { get; }
+            public int StepIndex { get; }
+            public int LastArrivedStepIndex { get; }
+            public Pose LastArrivalPose { get; }
+            public Pose LastReleasePose { get; }
+            public bool IsPickPlace { get; }
+            public int GripCount { get; }
+            public int ReleaseCount { get; }
+            public string FaultReason { get; }
+            public uint ProgramRevision { get; }
+            public IReadOnlyList<Pose> Targets { get; }
+
+            internal ProgramRecord(RobotWaypointSequence sequence, string reason)
+            {
+                Reason = reason; ProgramName = sequence.programName; ProductId = sequence.cycleProductId;
+                PreviousState = sequence.State; StepIndex = sequence.StepIndex;
+                LastArrivedStepIndex = sequence.LastArrivedStepIndex; LastArrivalPose = sequence.LastArrivalPose;
+                LastReleasePose = sequence.LastReleasePose; IsPickPlace = sequence.IsPickPlace;
+                GripCount = sequence.GripCount; ReleaseCount = sequence.ReleaseCount; FaultReason = sequence.LastError;
+                ProgramRevision = sequence.ProgramRevision;
+                Targets = Array.AsReadOnly((Pose[])sequence.targets.Clone());
+            }
+        }
+
+        public ProgramRecord[] CancellationSnapshot() => cancellations.ToArray();
+        public ProgramRecord[] ScenarioResetSnapshot() => scenarioResets.ToArray();
 
         public RobotWaypointSet Waypoints => waypoints;
+        public uint ProgramRevision { get; private set; }
         public RunState State { get; private set; }
         public int StepIndex { get; private set; }
         public string LastError { get; private set; }
@@ -32,6 +69,7 @@ namespace LineWatch
         public int LastArrivedStepIndex { get; private set; } = -1;
         public Pose LastArrivalPose { get; private set; }
         public bool IsBusy => State == RunState.Running || State == RunState.Acting;
+        public bool HasPendingProgram => State != RunState.Idle && State != RunState.Completed && State != RunState.Cancelled;
         public bool IsPickPlace { get; private set; }
         public GrippableItem CycleItem => transportItem;
         public int GripCount { get; private set; }
@@ -66,12 +104,14 @@ namespace LineWatch
             if (!Preflight(scara, fanuc, candidate, 0, out error)) return false;
             if (!Dispatch(scara, fanuc, candidate[0], 0, out error)) return false;
             source = waypoints; scaraOwner = scara; fanucOwner = fanuc;
+            ProgramRevision++;
             Array.Copy(candidate, targets, 4);
             if (scaraOwner != null) scaraGeometry = scaraOwner.Geometry;
             ownedVersion = Version;
             StepIndex = 0; LastError = null; State = RunState.Running;
             LastArrivedStepIndex = -1;
             IsPickPlace = gripper != null; transportGripper = gripper; transportItem = item;
+            cycleProductId = item != null ? item.ProductId : null; programName = source.name;
             GripCount = 0; ReleaseCount = 0;
             return true;
         }
@@ -140,6 +180,25 @@ namespace LineWatch
             LastAcknowledgedFaultReason = LastError;
             LastError = null;
             State = RunState.Paused;
+        }
+
+        // The coordinator has checked stopped robots and the explicit fault-only request.
+        // Retain the saved program and physical holding; never dispatch, release or acknowledge.
+        internal void CancelFromCell(string reason)
+        {
+            cancellations.Add(new ProgramRecord(this, reason));
+            State = RunState.Cancelled;
+        }
+
+        internal void ResetScenarioFromCell(string reason)
+        {
+            scenarioResets.Add(new ProgramRecord(this, reason));
+            source = null; scaraOwner = null; fanucOwner = null;
+            transportGripper = null; transportItem = null; cycleProductId = null; programName = null;
+            Array.Clear(targets, 0, targets.Length); ownedVersion = 0; scaraGeometry = default;
+            State = RunState.Idle; StepIndex = 0; LastArrivedStepIndex = -1;
+            LastArrivalPose = default; LastReleasePose = default; IsPickPlace = false;
+            GripCount = 0; ReleaseCount = 0; LastError = null; ProgramRevision++;
         }
 
         private bool Resume(out string error)

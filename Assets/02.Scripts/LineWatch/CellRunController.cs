@@ -106,6 +106,72 @@ namespace LineWatch
             return true;
         }
 
+        public bool CanCancelProgram(RobotWaypointSequence sequence, string reason, out string error)
+            => CanCancelProgram(sequence, sequence != null ? sequence.ProgramRevision : 0, reason, out error);
+
+        public bool CanCancelProgram(RobotWaypointSequence sequence, uint expectedRevision, string reason, out string error)
+        {
+            error = null;
+            if (!Application.isPlaying || !isActiveAndEnabled || !IsFaulted || !Wired ||
+                hasControlledSequence && controlledSequence == null)
+            { error = "연결이 유효한 활성 Faulted 셀에서만 미완료 경로를 명시 종료합니다."; return false; }
+            if (!ClockReady(out error)) return false;
+            if (!AtRest) { error = "두 로봇과 순차 운전을 정지한 뒤 경로를 종료하세요."; return false; }
+            if (sequence == null || sequence != scaraSequence && sequence != fanucSequence)
+            { error = "이 셀의 종료 대상 경로를 선택하세요."; return false; }
+            if (sequence.ProgramRevision != expectedRevision)
+            { error = "선택 후 경로가 교체되거나 초기화됐습니다. 종료 대상을 다시 선택하세요."; return false; }
+            if (sequence.State != RobotWaypointSequence.RunState.Paused && sequence.State != RobotWaypointSequence.RunState.Faulted)
+            { error = "일시정지/고장으로 중단된 미완료 경로만 종료할 수 있습니다."; return false; }
+            if (string.IsNullOrWhiteSpace(reason)) { error = "경로 종료 사유를 입력하세요."; return false; }
+            return true;
+        }
+
+        public bool TryCancelProgram(RobotWaypointSequence sequence, string reason, out string error)
+            => TryCancelProgram(sequence, sequence != null ? sequence.ProgramRevision : 0, reason, out error);
+
+        public bool TryCancelProgram(RobotWaypointSequence sequence, uint expectedRevision, string reason, out string error)
+        {
+            if (!CanCancelProgram(sequence, expectedRevision, reason, out error)) return false;
+            sequence.CancelFromCell(reason);
+            if (hasControlledSequence && controlledSequence == sequence)
+            {
+                controlledSequence = null;
+                hasControlledSequence = false;
+            }
+            return true;
+        }
+
+        public bool CanResetScenario(string reason, out string error)
+            => CanResetScenario(tracker != null ? tracker.ScenarioNumber : 0, reason, out error);
+
+        public bool CanResetScenario(int expectedScenario, string reason, out string error)
+        {
+            if (!CanReadReady(out error) || !ClockReady(out error)) return false;
+            if (tracker.ScenarioNumber != expectedScenario)
+            { error = "시나리오가 바뀌었습니다. 새 사유를 입력해 대상을 다시 확인하세요."; return false; }
+            if (State != CellRunState.Stopped || !AtRest)
+            { error = "셀과 두 로봇을 정지한 뒤 시나리오를 초기화하세요."; return false; }
+            if (HasPendingSequence(scaraSequence) || HasPendingSequence(fanucSequence))
+            { error = "미완료 경로를 마치거나 고장 경로를 명시 종료하세요."; return false; }
+            if (!ReferenceEquals(scaraGripper.HeldItem, null) || !ReferenceEquals(fanucGripper.HeldItem, null))
+            { error = "두 집게가 비어 있어야 합니다. 초기화로 보유를 해제하지 않습니다."; return false; }
+            if (string.IsNullOrWhiteSpace(reason)) { error = "시나리오 초기화 사유가 필요합니다."; return false; }
+            return tracker.CanResetScenario(out error);
+        }
+
+        public bool TryResetScenario(string reason, out string error)
+            => TryResetScenario(tracker != null ? tracker.ScenarioNumber : 0, reason, out error);
+
+        public bool TryResetScenario(int expectedScenario, string reason, out string error)
+        {
+            if (!CanResetScenario(expectedScenario, reason, out error)) return false;
+            tracker.ResetScenarioFromCell(reason.Trim());
+            scaraSequence.ResetScenarioFromCell(reason.Trim()); fanucSequence.ResetScenarioFromCell(reason.Trim());
+            controlledSequence = null; hasControlledSequence = false;
+            return true;
+        }
+
         internal bool CanIssueLegacyCommand(Component target, RobotWaypointSequence requester, out string error)
         {
             if (!Ready(out error)) return false;
@@ -230,12 +296,12 @@ namespace LineWatch
         {
             error = null;
             if (!Application.isPlaying || !isActiveAndEnabled || !IsFaulted || !Wired || requester != tracker)
-            { error = "같은 활성 셀의 Faulted 상태에서만 손실을 확정합니다."; return false; }
+            { error = "같은 활성 셀의 Faulted 상태에서만 상품을 명시 정리합니다."; return false; }
             if (!ClockReady(out error)) return false;
             if (!AtRest || hasControlledSequence || HasPendingSequence(scaraSequence) || HasPendingSequence(fanucSequence))
-            { error = "미완료/인계 경로가 있거나 로봇이 움직입니다. 저장된 상품 경로를 손실 처리로 무효화하지 않습니다."; return false; }
+            { error = "미완료/인계 경로가 있거나 로봇이 움직입니다. 저장된 상품 경로를 상품 정리로 무효화하지 않습니다."; return false; }
             if (!ReferenceEquals(scaraGripper.HeldItem, null) || !ReferenceEquals(fanucGripper.HeldItem, null))
-            { error = "두 집게의 실제 보유를 비운 상태에서만 삭제된 상품의 손실을 확정합니다."; return false; }
+            { error = "두 집게의 실제 보유를 비운 상태에서만 상품을 명시 정리합니다."; return false; }
             return true;
         }
 
@@ -271,8 +337,7 @@ namespace LineWatch
             scaraGripper.IsReady && fanucGripper.IsReady && scaraSequence != null && fanucSequence != null &&
             scaraSequence.IsReady && fanucSequence.IsReady;
         private bool AtRest => scaraGripper != null && fanucGripper != null && scaraGripper.IsStopped && fanucGripper.IsStopped;
-        private static bool HasPendingSequence(RobotWaypointSequence sequence) => sequence.State != RobotWaypointSequence.RunState.Idle &&
-            sequence.State != RobotWaypointSequence.RunState.Completed;
+        private static bool HasPendingSequence(RobotWaypointSequence sequence) => sequence.HasPendingProgram;
 
         private void Update() => SynchronizeFault();
         private void SynchronizeFault()

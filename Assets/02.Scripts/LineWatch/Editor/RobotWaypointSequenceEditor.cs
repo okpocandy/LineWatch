@@ -57,6 +57,7 @@ namespace LineWatch.Editor
                 cellLock.style.display = playing && !manual ? DisplayStyle.Flex : DisplayStyle.None;
                 string status = !playing ? "Play 대기" : sequence.State == RobotWaypointSequence.RunState.Idle ? "대기"
                     : sequence.State == RobotWaypointSequence.RunState.Completed ? "4/4 완료"
+                    : sequence.State == RobotWaypointSequence.RunState.Cancelled ? "명시 종료 · 재개 불가"
                     : sequence.IsBusy ? clock ? "실행 중" : "에디터/시간 일시정지"
                     : sequence.State == RobotWaypointSequence.RunState.Paused ? "정지" : "오류 중단";
                 state.text = !playing || sequence.State == RobotWaypointSequence.RunState.Idle || sequence.State == RobotWaypointSequence.RunState.Completed

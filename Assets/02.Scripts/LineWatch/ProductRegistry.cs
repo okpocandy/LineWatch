@@ -74,6 +74,17 @@ namespace LineWatch
             return true;
         }
 
+        internal bool TryReturnToQueue(string id, ProductLocation expected, out ProductRecord product, out string error)
+        {
+            product = null; error = null;
+            if (!TryGet(id, out var current) || current.Location != expected ||
+                expected != ProductLocation.Input && expected != ProductLocation.Scara && expected != ProductLocation.Handoff && expected != ProductLocation.Fanuc)
+            { error = "복구할 상품의 현재 점유 상태를 확인하세요."; return false; }
+            product = new ProductRecord(id, current.Destination, ProductLocation.Waiting);
+            products[id] = product;
+            return true;
+        }
+
         private static bool Allowed(ProductRecord product, ProductLocation next)
         {
             if (next == ProductLocation.Removed)

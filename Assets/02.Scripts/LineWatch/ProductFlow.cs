@@ -86,5 +86,16 @@ namespace LineWatch
             if (slots.ContainsKey(expected)) slots[expected] = null;
             return true;
         }
+
+        internal bool TryReturnToQueue(string id, ProductLocation expected, out ProductRecord product, out string error)
+        {
+            product = null; error = null;
+            if (!slots.TryGetValue(expected, out var occupant) || occupant != id || waiting.Contains(id))
+            { error = "복구 상품의 점유/대기열 상태가 맞지 않습니다."; return false; }
+            if (!registry.TryReturnToQueue(id, expected, out product, out error)) return false;
+            slots[expected] = null;
+            waiting.Enqueue(id);
+            return true;
+        }
     }
 }

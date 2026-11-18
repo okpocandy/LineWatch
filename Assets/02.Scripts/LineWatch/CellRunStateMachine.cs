@@ -50,7 +50,7 @@ namespace LineWatch
                     // A stop request is repeatable, but never acknowledges or clears a fault.
                     return true;
                 case CellRunCommand.Reset:
-                    if (!IsFaulted) return Reject("고장 상태에서만 명시적으로 해제합니다. 상품/통계 초기화는 지원하지 않습니다.", out error);
+                    if (!IsFaulted) return Reject("고장 상태에서만 명시적으로 해제합니다. 시나리오 초기화는 별도 요청입니다.", out error);
                     return true;
                 default:
                     return Reject("정의된 셀 운전 명령이 필요합니다.", out error);

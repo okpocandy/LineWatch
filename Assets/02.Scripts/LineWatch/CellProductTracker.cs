@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace LineWatch
@@ -26,6 +27,31 @@ namespace LineWatch
         private RobotGripper scaraGripper, fanucGripper;
         private CellCommandGate cellGate;
         private CellRunController cellController;
+        private readonly List<QueueRecovery> queueRecoveries = new List<QueueRecovery>();
+        private readonly HashSet<string> previousScenarioIds = new HashSet<string>();
+        private readonly List<ScenarioSummary> scenarios = new List<ScenarioSummary>();
+        public int ScenarioNumber { get; private set; } = 1;
+        public ProductRecord[] CurrentScenarioSnapshot() => flow.Snapshot().Where(r => !previousScenarioIds.Contains(r.Id)).ToArray();
+        public ScenarioSummary[] ScenarioSnapshot() => scenarios.ToArray();
+
+        public sealed class ScenarioSummary
+        {
+            public int Number { get; }
+            public string Reason { get; }
+            public IReadOnlyList<ProductRecord> Products { get; }
+            internal ScenarioSummary(int number, string reason, ProductRecord[] records)
+            { Number = number; Reason = reason; Products = Array.AsReadOnly(records); }
+        }
+
+        public sealed class QueueRecovery
+        {
+            public ProductRecord Previous { get; }
+            public ProductRecord Result { get; }
+            public string Reason { get; }
+            internal QueueRecovery(ProductRecord previous, ProductRecord result, string reason)
+            { Previous = previous; Result = result; Reason = reason; }
+        }
+        public QueueRecovery[] QueueRecoverySnapshot() => queueRecoveries.ToArray();
 
         public bool IsFaulted { get; private set; }
         public string FaultReason { get; private set; }
@@ -113,6 +139,65 @@ namespace LineWatch
         {
             if (!CanConfirmDestroyedLoss(id, expected, reason, out error)) return false;
             return flow.TryConfirmLoss(id, expected, reason, out _, out error);
+        }
+
+        public bool CanConfirmDestroyedLoss(ProductRecord expected, string reason, out string error)
+        {
+            if (expected == null || !flow.TryGet(expected.Id, out var current) || !ReferenceEquals(current, expected))
+            { error = "선택 후 상품 기록이 바뀌었습니다. 대상을 비운 뒤 다시 선택하세요."; return false; }
+            return CanConfirmDestroyedLoss(expected.Id, expected.Location, reason, out error);
+        }
+
+        public bool TryConfirmDestroyedLoss(ProductRecord expected, string reason, out string error)
+        {
+            if (!CanConfirmDestroyedLoss(expected, reason, out error)) return false;
+            return flow.TryConfirmLoss(expected.Id, expected.Location, reason, out _, out error);
+        }
+
+        public bool CanReturnToQueue(ProductRecord expected, string reason, out string error)
+        {
+            error = null;
+            if (!Application.isPlaying || !isActiveAndEnabled || !Wired || !IsFaulted || cellController == null)
+            { error = "활성 상품 추적기와 Faulted 셀에서만 원래 상품을 대기로 복귀합니다."; return false; }
+            if (!cellController.CanConfirmProductLoss(this, out error)) return false;
+            if (string.IsNullOrWhiteSpace(reason)) { error = "대기 복귀 사유가 필요합니다."; return false; }
+            if (expected == null || !flow.TryGet(expected.Id, out var current) || !ReferenceEquals(current, expected))
+            { error = "선택 후 상품 기록이 바뀌었습니다. 대상을 다시 선택하세요."; return false; }
+            if (current.Location != ProductLocation.Input && current.Location != ProductLocation.Scara &&
+                current.Location != ProductLocation.Handoff && current.Location != ProductLocation.Fanuc)
+            { error = "점유 중인 비종료 상품만 대기열 끝으로 복귀합니다."; return false; }
+            if (!products.TryGetValue(current.Id, out var binding) || binding.Item == null || !binding.Item.IsReady ||
+                binding.OriginalObject == null || binding.Item.gameObject != binding.OriginalObject || binding.Item.Owner != null ||
+                binding.Item.ProductTracker != this || binding.Item.ProductId != current.Id)
+            { error = "원래 상품의 활성·미보유·ID 연결을 확인하세요. 대체 물체나 실제 보유자를 강제 복구하지 않습니다."; return false; }
+            return true;
+        }
+
+        public bool TryReturnToQueue(ProductRecord expected, string reason, out string error)
+        {
+            if (!CanReturnToQueue(expected, reason, out error)) return false;
+            if (!flow.TryReturnToQueue(expected.Id, expected.Location, out var result, out error)) return false;
+            queueRecoveries.Add(new QueueRecovery(expected, result, reason.Trim()));
+            return true;
+        }
+
+        internal bool CanResetScenario(out string error)
+        {
+            error = null;
+            if (IsFaulted || !TryCheckPhysicalState(out error))
+            { if (error == null) error = "상품 고장을 먼저 명시 해제하세요."; return false; }
+            if (CurrentScenarioSnapshot().Length == 0) { error = "이번 시나리오는 이미 비어 있습니다."; return false; }
+            if (flow.Snapshot().Any(r => !Terminal(r.Location)) || flow.WaitingCount != 0 ||
+                InputProductId != null || ScaraProductId != null || HandoffProductId != null || FanucProductId != null)
+            { error = "모든 상품을 완료·제거·손실 확정한 뒤 시나리오를 초기화하세요."; return false; }
+            return true;
+        }
+
+        internal void ResetScenarioFromCell(string reason)
+        {
+            scenarios.Add(new ScenarioSummary(ScenarioNumber, reason, CurrentScenarioSnapshot()));
+            foreach (var record in flow.Snapshot()) previousScenarioIds.Add(record.Id);
+            ScenarioNumber++;
         }
 
         public bool TryRemove(string id, ProductLocation expected, out string error)

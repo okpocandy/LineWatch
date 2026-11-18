@@ -75,6 +75,7 @@ namespace LineWatch.Editor
                     (sequence.State == RobotWaypointSequence.RunState.Paused || sequence.State == RobotWaypointSequence.RunState.Faulted));
                 autoState.text = !playing ? "Play 대기" : sequence == null || !sequence.IsPickPlace ? "자동 집기 운전 대기"
                     : sequence.State == RobotWaypointSequence.RunState.Completed ? "자동 운전 완료 · 물체 놓기 완료"
+                    : sequence.State == RobotWaypointSequence.RunState.Cancelled ? "자동 운전 명시 종료 · 보유/행동 이력 유지"
                     : $"자동 운전 {(sequence.State == RobotWaypointSequence.RunState.Paused ? "정지" : sequence.State == RobotWaypointSequence.RunState.Faulted ? "오류 중단" : "실행 중")} · {sequence.StepName}";
                 item.SetValueWithoutNotify(target);
                 prepare.SetEnabled(ready && g.HeldItem == null && (target == null || target.Owner == null));

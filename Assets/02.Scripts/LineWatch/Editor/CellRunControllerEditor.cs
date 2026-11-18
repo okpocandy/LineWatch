@@ -94,8 +94,11 @@ namespace LineWatch.Editor
             Row(takeScara, takeFanuc); Row(start, pause, resume); Row(stop, reset); Row(release);
             var request = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-run-request" }; root.Add(request);
             root.Add(new HelpBox("개별 자동/순차 운전을 정지한 뒤 경로를 인계하세요. 공통 정지는 권한과 보유를 유지합니다. 개별 조작 복귀는 정지 후 권한 반환으로 구분합니다. 활성 버튼도 실행 직전 경로·정렬 검사에서 거부될 수 있습니다.", HelpBoxMessageType.Info));
-            root.Add(new HelpBox("고장 해제는 실물·ID·보유/위치가 확인되는 셀/추적 고장과 셀이 인계받은 경로 고장을 명시 해제합니다. 미인계 고장 경로 하나는 먼저 복구 대상으로 인계하세요. 자동 집기 경로는 집기 전 또는 같은 실물 보유 중의 단계/행동 횟수를 확인합니다. 경로/FK 검사 후 셀 Stopped·경로 Paused에서 대기하며 상품·통계·보유·단계·인계 권한을 유지합니다. 원본 삭제 상품의 손실 확정은 아래 별도 영역에서 요청하며 고장 해제와 구분합니다. 실물 잔존/보유 불일치·복수 미완료/놓기 완료 후 경로 복구·데이터 초기화는 후속입니다.", HelpBoxMessageType.Info));
+            root.Add(new HelpBox("고장 해제는 실물·ID·보유/위치가 확인되는 셀/추적 고장과 셀이 인계받은 경로 고장을 명시 해제합니다. 미인계 고장 경로 하나는 먼저 복구 대상으로 인계하세요. 자동 집기 경로는 집기 전 또는 같은 실물 보유 중의 단계/행동 횟수를 확인합니다. 경로/FK 검사 후 셀 Stopped·경로 Paused에서 대기하며 상품·통계·보유·단계·인계 권한을 유지합니다. 원본 삭제 상품의 손실 확정은 아래 별도 영역에서 요청하며 고장 해제와 구분합니다. 실물이 남은 미보유 상품은 사유를 남겨 대기로 복귀할 수 있습니다. 재개하지 않을 경로는 아래 명시 종료를 사용하세요. 시나리오 초기화는 모든 상품 종료와 별도 고장 해제 후에만 가능합니다.", HelpBoxMessageType.Info));
             root.Add(CreateLossControls(cell));
+            root.Add(CreateCancellationControls(cell, scara, fanuc));
+            root.Add(CreateQueueRecoveryControls(cell));
+            root.Add(CreateScenarioControls(cell));
             void Refresh()
             {
                 if (cell == null)
@@ -122,6 +125,10 @@ namespace LineWatch.Editor
                 else if (tracker != null && !string.IsNullOrEmpty(tracker.LastAcknowledgedFaultReason)) products.text += "\n최근 추적 명시 해제: " + tracker.LastAcknowledgedFaultReason;
                 if (tracker != null)
                 {
+                    var current = tracker.CurrentScenarioSnapshot();
+                    products.text += $"\n시나리오 #{tracker.ScenarioNumber}: 등록 {current.Length} · 완료 {current.Count(r => r.Location == ProductLocation.OutputA || r.Location == ProductLocation.OutputB)} · 제거 {current.Count(r => r.Location == ProductLocation.Removed)} · 손실 {current.Count(r => r.Location == ProductLocation.Lost)} · 초기화 이력 {tracker.ScenarioSnapshot().Length}";
+                    var recoveries = tracker.QueueRecoverySnapshot();
+                    if (recoveries.Length > 0) products.text += "\n명시 대기 복귀 " + recoveries.Length + ": " + recoveries[recoveries.Length - 1].Previous.Id + " · " + recoveries[recoveries.Length - 1].Reason;
                     var losses = tracker.Snapshot().Where(r => r.Location == ProductLocation.Lost).ToArray();
                     if (losses.Length > 0) products.text += "\n명시 손실 확정 " + losses.Length + ": " +
                         string.Join(" / ", losses.Select(r => r.Id + " · 이전 " + r.LostFrom + " · " + r.LossReason));
@@ -180,7 +187,7 @@ namespace LineWatch.Editor
                     string id = selected.Id;
                     // Use the location captured on explicit selection. Never replace the
                     // operator's request with a newer record during scheduled refreshes.
-                    accepted = tracker.TryConfirmDestroyedLoss(id, selected.Location, reason.value, out var error);
+                    accepted = tracker.TryConfirmDestroyedLoss(selected, reason.value, out var error);
                     message = accepted ? id + " 손실 확정 기록 · 고장 해제는 별도 요청입니다." : error;
                     if (accepted)
                     {
@@ -223,7 +230,7 @@ namespace LineWatch.Editor
                     : selected.Id + " · 목적지 " + selected.Destination + " · 선택 당시 " + selected.Location + " / 현재 " +
                         (tracker != null && tracker.TryGet(selected.Id, out var current) ? current.Location.ToString() : "확인 불가");
                 string why = !ready ? "활성 LineWatch Play에서 대상을 선택하세요." : selected == null ? "손실 확정 대상을 선택하세요." : null;
-                bool canConfirm = ready && selected != null && tracker.CanConfirmDestroyedLoss(selected.Id, selected.Location, reason.value, out why);
+                bool canConfirm = ready && selected != null && tracker.CanConfirmDestroyedLoss(selected, reason.value, out why);
                 confirm.SetEnabled(canConfirm);
                 confirm.tooltip = canConfirm ? "실행 직전 삭제 증거·보유·경로와 선택 당시 위치를 다시 검사합니다." : why;
                 eligibility.text = canConfirm ? "삭제 증거와 운전 조건 확인 · ID/사유를 검토한 뒤 명시적으로 확정하세요." : why;
@@ -234,15 +241,171 @@ namespace LineWatch.Editor
             return panel;
         }
 
+        private static VisualElement CreateCancellationControls(CellRunController cell, RobotWaypointSequence scara, RobotWaypointSequence fanuc)
+        {
+            const string placeholder = "대상을 선택하세요";
+            var panel = new Foldout { name = "cell-cancel-panel", text = "경로 명시 종료 · 상품/고장 유지", value = false };
+            var target = new DropdownField("종료할 경로", new List<string> { placeholder, "SCARA", "FANUC" }, 0) { name = "cell-cancel-target" };
+            var reason = new TextField("경로 종료 사유") { name = "cell-cancel-reason", multiline = true };
+            reason.style.minHeight = 48; reason.style.maxHeight = 100;
+            var selection = new Label { name = "cell-cancel-selection" }; selection.style.whiteSpace = WhiteSpace.Normal;
+            var eligibility = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-cancel-eligibility" };
+            var result = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-cancel-request" };
+            RobotWaypointSequence selected = null; uint revision = 0; string message = null; bool accepted = false;
+            panel.Add(new HelpBox("Faulted 상태에서 정지된 경로만 종료합니다. 저장 단계·집기/놓기·종료 사유는 이력으로 남고 상품·보유·고장은 유지됩니다. 이 경로는 재개할 수 없습니다. 손실 확정/고장 해제/새 시작은 별도입니다. 대상 변경 시 사유가 비워집니다.", HelpBoxMessageType.Info));
+            panel.Add(target); panel.Add(reason); panel.Add(selection); panel.Add(eligibility);
+            Button confirm = null;
+            confirm = new Button(() =>
+            {
+                accepted = false;
+                if (cell == null || selected == null) message = "종료할 경로를 선택하세요.";
+                else
+                {
+                    accepted = cell.TryCancelProgram(selected, revision, reason.value, out var error);
+                    message = accepted ? target.value + " 경로 종료 기록 · 상품/고장은 유지됩니다." : error;
+                    if (accepted) { selected = null; target.SetValueWithoutNotify(placeholder); reason.SetValueWithoutNotify(""); }
+                }
+                Refresh();
+            }) { name = "cell-cancel-confirm", text = "선택 경로 명시 종료 · 재개 불가" };
+            confirm.style.minHeight = 28; panel.Add(confirm); panel.Add(result);
+            target.RegisterValueChangedCallback(evt =>
+            {
+                selected = evt.newValue == "SCARA" ? scara : evt.newValue == "FANUC" ? fanuc : null;
+                revision = selected != null ? selected.ProgramRevision : 0;
+                reason.SetValueWithoutNotify(""); Refresh();
+            });
+            reason.RegisterValueChangedCallback(_ => Refresh());
+            void Refresh()
+            {
+                bool ready = Application.isPlaying && cell != null && cell.isActiveAndEnabled;
+                target.SetEnabled(ready); reason.SetEnabled(ready);
+                selection.text = selected == null ? "선택된 경로 없음 · 자동 선택하지 않습니다."
+                    : target.value + " · 선택 경로 #" + revision + " / 현재 #" + selected.ProgramRevision + " · " + selected.State +
+                        " · 단계 " + (selected.StepIndex + 1) + " · 집기 " + selected.GripCount + " / 놓기 " + selected.ReleaseCount;
+                string why = !ready ? "활성 LineWatch Play에서 대상을 선택하세요." : selected == null ? "종료할 경로를 선택하세요." : null;
+                bool allowed = ready && selected != null && cell.CanCancelProgram(selected, revision, reason.value, out why);
+                confirm.SetEnabled(allowed); confirm.tooltip = allowed ? "실행 직전 경로 번호·정지·고장·사유를 다시 검사합니다." : why;
+                eligibility.text = allowed ? "저장 경로와 사유를 검토한 뒤 명시적으로 종료하세요." : why;
+                result.text = message ?? ""; result.messageType = accepted ? HelpBoxMessageType.Info : HelpBoxMessageType.Warning;
+                result.style.display = string.IsNullOrEmpty(message) ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+            Refresh(); panel.schedule.Execute(Refresh).Every(100); return panel;
+        }
+
+        private static VisualElement CreateQueueRecoveryControls(CellRunController cell)
+        {
+            const string placeholder = "대상을 선택하세요";
+            var tracker = cell.GetComponent<CellProductTracker>(); ProductRecord selected = null;
+            var panel = new Foldout { name = "cell-requeue-panel", text = "원래 실물 대기 복귀 · 보유 없음", value = false };
+            var target = new DropdownField("상품 ID", new List<string> { placeholder }, 0) { name = "cell-requeue-target" };
+            var reason = new TextField("대기 복귀 사유") { name = "cell-requeue-reason", multiline = true };
+            reason.style.minHeight = 48; reason.style.maxHeight = 100;
+            var selection = new Label { name = "cell-requeue-selection" }; selection.style.whiteSpace = WhiteSpace.Normal;
+            var eligibility = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-requeue-eligibility" };
+            var result = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-requeue-request" };
+            string message = null; bool accepted = false, refreshing = false;
+            panel.Add(new HelpBox("원래 상품이 활성·미보유 상태이고 두 집게/저장 경로가 비었을 때만 대기열 끝으로 복귀합니다. 물체 위치·Owner는 바꾸지 않습니다. 다른 상품의 FIFO와 고장은 유지합니다. 투입 위치 정렬·고장 해제·재투입은 별도입니다.", HelpBoxMessageType.Info));
+            panel.Add(target); panel.Add(reason); panel.Add(selection); panel.Add(eligibility);
+            Button confirm = null;
+            confirm = new Button(() =>
+            {
+                accepted = false;
+                if (cell == null || tracker == null || selected == null) message = "복귀할 상품을 선택하세요.";
+                else
+                {
+                    string id = selected.Id; accepted = tracker.TryReturnToQueue(selected, reason.value, out var error);
+                    message = accepted ? id + " 대기열 끝 복귀 기록 · 고장은 유지됩니다." : error;
+                    if (accepted) { selected = null; target.SetValueWithoutNotify(placeholder); reason.SetValueWithoutNotify(""); }
+                }
+                Refresh();
+            }) { name = "cell-requeue-confirm", text = "원래 상품을 대기열 끝으로 복귀" };
+            confirm.style.minHeight = 28; panel.Add(confirm); panel.Add(result);
+            target.RegisterValueChangedCallback(evt =>
+            {
+                if (refreshing) return;
+                selected = null; reason.SetValueWithoutNotify("");
+                if (tracker != null && evt.newValue.StartsWith("ID ") && tracker.TryGet(evt.newValue.Substring(3), out var record)) selected = record;
+                Refresh();
+            });
+            reason.RegisterValueChangedCallback(_ => Refresh());
+            void Refresh()
+            {
+                bool ready = Application.isPlaying && cell != null && cell.isActiveAndEnabled && tracker != null && tracker.isActiveAndEnabled;
+                target.SetEnabled(ready); reason.SetEnabled(ready);
+                var choices = new List<string> { placeholder };
+                if (tracker != null) choices.AddRange(tracker.Snapshot().Where(r => r.Location == ProductLocation.Input || r.Location == ProductLocation.Scara || r.Location == ProductLocation.Handoff || r.Location == ProductLocation.Fanuc).Select(r => "ID " + r.Id));
+                string choice = selected == null ? placeholder : "ID " + selected.Id;
+                if (selected != null && !choices.Contains(choice)) choices.Add(choice);
+                if (!target.choices.SequenceEqual(choices))
+                {
+                    refreshing = true;
+                    try { target.choices = choices; target.SetValueWithoutNotify(choice); }
+                    finally { refreshing = false; }
+                }
+                selection.text = selected == null ? "선택된 상품 없음 · 자동 선택하지 않습니다."
+                    : selected.Id + " · 선택 당시 " + selected.Location + " / 현재 " + (tracker != null && tracker.TryGet(selected.Id, out var record) ? record.Location.ToString() : "확인 불가");
+                string why = !ready ? "활성 LineWatch Play에서 대상을 선택하세요." : selected == null ? "복귀할 상품을 선택하세요." : null;
+                bool allowed = ready && selected != null && tracker.CanReturnToQueue(selected, reason.value, out why);
+                confirm.SetEnabled(allowed); confirm.tooltip = why;
+                eligibility.text = allowed ? "원래 실물·ID·미보유와 선택 당시 기록 확인 · 사유를 검토하세요." : why;
+                result.text = message ?? ""; result.messageType = accepted ? HelpBoxMessageType.Info : HelpBoxMessageType.Warning;
+                result.style.display = string.IsNullOrEmpty(message) ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+            Refresh(); panel.schedule.Execute(Refresh).Every(100); return panel;
+        }
+
+        private static VisualElement CreateScenarioControls(CellRunController cell)
+        {
+            var tracker = cell.GetComponent<CellProductTracker>(); int expectedScenario = 0;
+            var panel = new Foldout { name = "cell-scenario-panel", text = "시나리오 초기화 · 누적 이력 보존", value = false };
+            var reason = new TextField("초기화 사유") { name = "cell-scenario-reason" };
+            var eligibility = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-scenario-eligibility" };
+            var result = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-scenario-request" };
+            bool accepted = false; string message = null;
+            panel.Add(new HelpBox("모든 상품의 완료/제거/손실 확정과 별도 고장 해제 후 셀 Stopped·빈 집게·미완료 경로 없음이 필요합니다. 이번 집계는 0, 경로는 Idle, 명령 권한은 반환합니다. 누적 상품/복구/행동 이력·실물·관절 위치는 보존합니다. 새 샘플 생성/자동 시작은 없습니다. 사유 입력 시 시나리오 번호를 고정합니다.", HelpBoxMessageType.Info));
+            panel.Add(reason); panel.Add(eligibility);
+            Button confirm = null;
+            confirm = new Button(() =>
+            {
+                accepted = false;
+                if (cell == null) message = "셀 연결을 확인하세요.";
+                else
+                {
+                    accepted = cell.TryResetScenario(expectedScenario, reason.value, out var error);
+                    message = accepted ? "시나리오 초기화 완료 · 새 상품 등록/시작은 별도입니다." : error;
+                    if (accepted) { reason.SetValueWithoutNotify(""); expectedScenario = 0; }
+                }
+                Refresh();
+            }) { name = "cell-scenario-confirm", text = "이번 시나리오 초기화 · 누적 이력 보존" };
+            confirm.style.minHeight = 28; panel.Add(confirm); panel.Add(result);
+            reason.RegisterValueChangedCallback(_ => { expectedScenario = tracker != null ? tracker.ScenarioNumber : 0; Refresh(); });
+            void Refresh()
+            {
+                bool ready = Application.isPlaying && cell != null && cell.isActiveAndEnabled && tracker != null && tracker.isActiveAndEnabled;
+                reason.SetEnabled(ready);
+                bool hasReason = !string.IsNullOrWhiteSpace(reason.value);
+                string why = !ready ? "활성 LineWatch Play가 필요합니다." : !hasReason ? "초기화 사유를 입력하세요." : null;
+                bool allowed = ready && hasReason && cell.CanResetScenario(expectedScenario, reason.value, out why);
+                confirm.SetEnabled(allowed); confirm.tooltip = why;
+                eligibility.text = allowed ? "대상 시나리오 #" + expectedScenario + " · 초기화 영향을 확인한 뒤 실행하세요." : why;
+                result.text = message ?? ""; result.messageType = accepted ? HelpBoxMessageType.Info : HelpBoxMessageType.Warning;
+                result.style.display = string.IsNullOrEmpty(message) ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+            Refresh(); panel.schedule.Execute(Refresh).Every(100); return panel;
+        }
+
         private static string RobotText(string id, RobotWaypointSequence sequence)
         {
             if (sequence == null) return id + ": 경로 연결 없음";
             var gripper = sequence.GetComponent<RobotGripper>(); var item = gripper != null ? gripper.HeldItem : null;
             string held = item == null ? "없음" : item.Owner != gripper ? "보유 불일치" : item.ProductId ?? item.name;
             string step = sequence.State == RobotWaypointSequence.RunState.Idle ? "대기"
-                : sequence.State == RobotWaypointSequence.RunState.Completed ? "완료" : $"{sequence.StepIndex + 1}/4 {sequence.StepName}";
+                : sequence.State == RobotWaypointSequence.RunState.Completed ? "완료"
+                : sequence.State == RobotWaypointSequence.RunState.Cancelled ? "명시 종료 · 재개 불가" : $"{sequence.StepIndex + 1}/4 {sequence.StepName}";
             string reason = sequence.State == RobotWaypointSequence.RunState.Faulted ? "\n경로 고장 유지: " + sequence.LastError
                 : string.IsNullOrEmpty(sequence.LastAcknowledgedFaultReason) ? "" : "\n최근 경로 명시 해제: " + sequence.LastAcknowledgedFaultReason;
+            var cancellations = sequence.CancellationSnapshot();
+            if (cancellations.Length > 0) reason += $"\n경로 명시 종료 이력 {cancellations.Length}: {cancellations[cancellations.Length - 1].Reason}";
             return $"{id}: {sequence.State} · 단계 {step} · 실물 보유 {held}" + reason;
         }
     }
