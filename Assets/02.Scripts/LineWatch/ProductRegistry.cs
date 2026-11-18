@@ -5,17 +5,20 @@ using System.Linq;
 namespace LineWatch
 {
     public enum ProductDestination { A, B }
-    public enum ProductLocation { Waiting, Input, Scara, Handoff, Fanuc, OutputA, OutputB, Removed }
+    public enum ProductLocation { Waiting, Input, Scara, Handoff, Fanuc, OutputA, OutputB, Removed, Lost }
 
     public sealed class ProductRecord
     {
         public string Id { get; }
         public ProductDestination Destination { get; }
         public ProductLocation Location { get; }
+        public ProductLocation? LostFrom { get; }
+        public string LossReason { get; }
 
-        internal ProductRecord(string id, ProductDestination destination, ProductLocation location)
+        internal ProductRecord(string id, ProductDestination destination, ProductLocation location, ProductLocation? lostFrom = null, string lossReason = null)
         {
             Id = id; Destination = destination; Location = location;
+            LostFrom = lostFrom; LossReason = lossReason;
         }
     }
 
@@ -53,6 +56,20 @@ namespace LineWatch
             if (current.Location != expected) { error = "상품의 현재 상태가 요청 시점과 다릅니다."; return false; }
             if (!Allowed(current, next)) { error = "상품의 이동 순서 또는 목적지가 맞지 않습니다."; return false; }
             product = new ProductRecord(id, current.Destination, next);
+            products[id] = product;
+            return true;
+        }
+
+        public bool TryConfirmLoss(string id, ProductLocation expected, string reason, out ProductRecord product, out string error)
+        {
+            product = null; error = null;
+            if (string.IsNullOrWhiteSpace(reason)) { error = "손실 확정 사유가 필요합니다."; return false; }
+            if (!TryGet(id, out var current)) { error = "등록되지 않은 상품입니다."; return false; }
+            if (current.Location != expected) { error = "상품의 현재 상태가 요청 시점과 다릅니다."; return false; }
+            if (expected != ProductLocation.Waiting && expected != ProductLocation.Input && expected != ProductLocation.Scara &&
+                expected != ProductLocation.Handoff && expected != ProductLocation.Fanuc)
+            { error = "완료/제거/손실 확정 이력은 다시 정리하지 않습니다."; return false; }
+            product = new ProductRecord(id, current.Destination, ProductLocation.Lost, expected, reason.Trim());
             products[id] = product;
             return true;
         }

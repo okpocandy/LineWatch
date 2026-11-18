@@ -14,9 +14,18 @@ namespace LineWatch
         [SerializeField] private ProductDestination initialDestination = ProductDestination.A;
 
         private readonly ProductFlow flow = new ProductFlow();
-        private readonly Dictionary<string, GrippableItem> products = new Dictionary<string, GrippableItem>();
+        // Keep both original identities: a destroyed component does not prove that its
+        // GameObject/physical body is gone. This is evidence, not another owner field.
+        private readonly struct ProductBinding
+        {
+            public readonly GrippableItem Item;
+            public readonly GameObject OriginalObject;
+            public ProductBinding(GrippableItem item) { Item = item; OriginalObject = item.gameObject; }
+        }
+        private readonly Dictionary<string, ProductBinding> products = new Dictionary<string, ProductBinding>();
         private RobotGripper scaraGripper, fanucGripper;
         private CellCommandGate cellGate;
+        private CellRunController cellController;
 
         public bool IsFaulted { get; private set; }
         public string FaultReason { get; private set; }
@@ -31,11 +40,17 @@ namespace LineWatch
         public IReadOnlyList<string> WaitingSnapshot() => flow.WaitingSnapshot();
         public bool TryGet(string id, out ProductRecord record) => flow.TryGet(id, out record);
         public bool TryGetItem(string id, out GrippableItem item)
-        { item = null; return id != null && products.TryGetValue(id, out item) && item != null; }
+        {
+            item = null;
+            if (id == null || !products.TryGetValue(id, out var binding)) return false;
+            item = binding.Item;
+            return item != null;
+        }
 
         private void Awake()
         {
             cellGate = new CellCommandGate(this);
+            cellController = GetComponent<CellRunController>();
             if (layout == null) return;
             if (layout.Scara != null) scaraGripper = layout.Scara.GetComponent<RobotGripper>();
             if (layout.Fanuc != null) fanucGripper = layout.Fanuc.GetComponent<RobotGripper>();
@@ -56,7 +71,7 @@ namespace LineWatch
             if (item.transform.IsChildOf(layout.Scara.transform) || item.transform.IsChildOf(layout.Fanuc.transform))
             { error = "로봇 계층의 물체는 상품으로 등록할 수 없습니다."; return false; }
             if (!flow.TryEnqueue(id, destination, out _, out error)) return false;
-            products.Add(id, item);
+            products.Add(id, new ProductBinding(item));
             item.BindProduct(this, id);
             return true;
         }
@@ -73,6 +88,31 @@ namespace LineWatch
             { error = "선두 상품의 실제 물체를 확인하세요."; return false; }
             if (!At(item, layout.InputStop)) { error = "선두 상품이 투입 정지점에 정렬되지 않았습니다."; return false; }
             return flow.TryFeedNext(out record, out error);
+        }
+
+        // A loss receipt resolves one destroyed original, not a still-existing/disabled
+        // item or a pending transport program. Fault acknowledgement remains separate.
+        public bool CanConfirmDestroyedLoss(string id, ProductLocation expected, string reason, out string error)
+        {
+            error = null;
+            if (!Application.isPlaying || !isActiveAndEnabled || !Wired || !IsFaulted)
+            { error = "활성 상품 추적기가 고장을 유지하는 Play 상태에서만 손실을 확정합니다."; return false; }
+            if (cellController == null || !cellGate.IsManagedBy(cellController))
+            { error = "같은 셀의 운전 관리자 연결이 필요합니다."; return false; }
+            if (!cellController.CanConfirmProductLoss(this, out error)) return false;
+            if (string.IsNullOrWhiteSpace(reason)) { error = "손실 확정 사유가 필요합니다."; return false; }
+            if (!flow.TryGet(id, out var record)) { error = "등록되지 않은 상품입니다."; return false; }
+            if (record.Location != expected || Terminal(record.Location))
+            { error = "현재 비종료 상품 상태와 손실 요청이 맞지 않습니다."; return false; }
+            if (!products.TryGetValue(id, out var binding) || binding.Item != null || binding.OriginalObject != null)
+            { error = "등록된 원래 GameObject의 삭제가 확인되어야 합니다. 컴포넌트 소실·비활성/탈락/위치 불일치는 미확정으로 유지합니다."; return false; }
+            return true;
+        }
+
+        public bool TryConfirmDestroyedLoss(string id, ProductLocation expected, string reason, out string error)
+        {
+            if (!CanConfirmDestroyedLoss(id, expected, reason, out error)) return false;
+            return flow.TryConfirmLoss(id, expected, reason, out _, out error);
         }
 
         public bool TryRemove(string id, ProductLocation expected, out string error)
@@ -139,9 +179,11 @@ namespace LineWatch
             foreach (var pair in products)
             {
                 flow.TryGet(pair.Key, out var record);
-                var item = pair.Value;
+                var item = pair.Value.Item;
                 if (Terminal(record.Location))
                 {
+                    if (record.Location == ProductLocation.Lost && (item != null || pair.Value.OriginalObject != null))
+                    { error = "손실 확정 상품 " + record.Id + "의 원래 실물이 남아 있습니다."; return false; }
                     if (item != null && item.Owner != null) { error = "완료/제거 상품 " + record.Id + "이 실제로 보유되어 있습니다."; return false; }
                     continue;
                 }
@@ -201,7 +243,7 @@ namespace LineWatch
 
         private static bool At(GrippableItem item, Transform point) => Vector3.Distance(item.Body.position, point.position) <= RobotGripper.PositionToleranceMetres &&
             RobotGripper.RotationError(item.Body.rotation, point.rotation) <= RobotGripper.RotationToleranceDegrees;
-        private static bool Terminal(ProductLocation location) => location == ProductLocation.OutputA || location == ProductLocation.OutputB || location == ProductLocation.Removed;
+        private static bool Terminal(ProductLocation location) => location == ProductLocation.OutputA || location == ProductLocation.OutputB || location == ProductLocation.Removed || location == ProductLocation.Lost;
         private bool Wired => layout != null && layout.gameObject == gameObject && scaraGripper != null && fanucGripper != null &&
             scaraGripper.Scara == layout.Scara && fanucGripper.Fanuc == layout.Fanuc && layout.Scara.transform.IsChildOf(layout.transform) && layout.Fanuc.transform.IsChildOf(layout.transform) &&
             layout.InputStop != null && layout.HandoffPoint != null && layout.OutputA != null && layout.OutputB != null;

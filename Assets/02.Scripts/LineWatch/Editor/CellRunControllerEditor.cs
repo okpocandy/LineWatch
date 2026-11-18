@@ -73,7 +73,8 @@ namespace LineWatch.Editor
             {
                 if (cell == null) { requestAccepted = false; requestMessage = "셀 운전 관리자가 없습니다."; return; }
                 requestAccepted = cell.TryTakeControl(sequence, out var error);
-                requestMessage = requestAccepted ? text + " 수락 · 공통 시작으로 경로를 이어가세요." : error;
+                requestMessage = requestAccepted ? cell.IsFaulted ? "복구 인계 수락 · 고장 해제 후 별도 공통 시작을 요청하세요."
+                    : text + " 수락 · 공통 시작으로 경로를 이어가세요." : error;
             }) { name = name, text = text };
             var takeScara = Take(scara, "cell-run-take-scara", "SCARA 경로 인계");
             var takeFanuc = Take(fanuc, "cell-run-take-fanuc", "FANUC 경로 인계");
@@ -93,7 +94,8 @@ namespace LineWatch.Editor
             Row(takeScara, takeFanuc); Row(start, pause, resume); Row(stop, reset); Row(release);
             var request = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-run-request" }; root.Add(request);
             root.Add(new HelpBox("개별 자동/순차 운전을 정지한 뒤 경로를 인계하세요. 공통 정지는 권한과 보유를 유지합니다. 개별 조작 복귀는 정지 후 권한 반환으로 구분합니다. 활성 버튼도 실행 직전 경로·정렬 검사에서 거부될 수 있습니다.", HelpBoxMessageType.Info));
-            root.Add(new HelpBox("고장 해제는 실물·ID·보유/위치가 확인되는 셀/추적 고장과 셀이 인계받은 경로 고장을 명시 해제합니다. 자동 집기 경로는 집기 전 또는 같은 실물 보유 중의 단계/행동 횟수를 확인합니다. 경로/FK 검사 후 셀 Stopped·경로 Paused에서 대기하며 상품·통계·보유·단계·인계 권한을 유지합니다. 손실/보유 불일치·미인계/놓기 완료 후 경로 복구·데이터 초기화는 후속입니다.", HelpBoxMessageType.Info));
+            root.Add(new HelpBox("고장 해제는 실물·ID·보유/위치가 확인되는 셀/추적 고장과 셀이 인계받은 경로 고장을 명시 해제합니다. 미인계 고장 경로 하나는 먼저 복구 대상으로 인계하세요. 자동 집기 경로는 집기 전 또는 같은 실물 보유 중의 단계/행동 횟수를 확인합니다. 경로/FK 검사 후 셀 Stopped·경로 Paused에서 대기하며 상품·통계·보유·단계·인계 권한을 유지합니다. 원본 삭제 상품의 손실 확정은 아래 별도 영역에서 요청하며 고장 해제와 구분합니다. 실물 잔존/보유 불일치·복수 미완료/놓기 완료 후 경로 복구·데이터 초기화는 후속입니다.", HelpBoxMessageType.Info));
+            root.Add(CreateLossControls(cell));
             void Refresh()
             {
                 if (cell == null)
@@ -118,6 +120,12 @@ namespace LineWatch.Editor
                 products.text = tracker == null ? "상품 추적: 연결 없음" : $"상품 등록 기록: {tracker.Count} · 대기 {tracker.WaitingSnapshot().Count}\n투입 {tracker.InputProductId ?? "-"} / SCARA {tracker.ScaraProductId ?? "-"} / 인계 {tracker.HandoffProductId ?? "-"} / FANUC {tracker.FanucProductId ?? "-"}";
                 if (tracker != null && tracker.IsFaulted) products.text += "\n추적 고장 유지: " + tracker.FaultReason;
                 else if (tracker != null && !string.IsNullOrEmpty(tracker.LastAcknowledgedFaultReason)) products.text += "\n최근 추적 명시 해제: " + tracker.LastAcknowledgedFaultReason;
+                if (tracker != null)
+                {
+                    var losses = tracker.Snapshot().Where(r => r.Location == ProductLocation.Lost).ToArray();
+                    if (losses.Length > 0) products.text += "\n명시 손실 확정 " + losses.Length + ": " +
+                        string.Join(" / ", losses.Select(r => r.Id + " · 이전 " + r.LostFrom + " · " + r.LossReason));
+                }
                 foreach (var pair in commands)
                 {
                     bool allowed = cell.CanExecute(pair.Key, out var reason);
@@ -125,8 +133,12 @@ namespace LineWatch.Editor
                 }
                 takeScara.SetEnabled(cell.CanTakeControl(scara, out var scaraReason)); takeScara.tooltip = scaraReason;
                 takeFanuc.SetEnabled(cell.CanTakeControl(fanuc, out var fanucReason)); takeFanuc.tooltip = fanucReason;
+                takeScara.text = cell.IsFaulted ? "SCARA 고장 복구 인계" : "SCARA 경로 인계";
+                takeFanuc.text = cell.IsFaulted ? "FANUC 고장 복구 인계" : "FANUC 경로 인계";
                 release.SetEnabled(cell.CanReleaseControl(out var releaseReason)); release.tooltip = releaseReason;
                 mode.text = !playing ? "Play 실행 후 셀과 개별 경로를 조작할 수 있습니다."
+                    : cell.IsFaulted ? cell.HasControlledSequence ? "복구 경로 인계 유지: 고장 해제 후 별도 공통 시작으로 이어갑니다."
+                        : "고장 경로 하나를 복구 대상으로 인계하세요. 인계 후에도 고장은 유지되며 별도 해제/시작이 필요합니다."
                     : !cell.HasControlledSequence ? "인계 없음: 공통 시작은 운전 허가만 바꿉니다. 로봇은 자동 출발하지 않습니다."
                     : cell.ControlledSequence != null && cell.ControlledSequence.State == RobotWaypointSequence.RunState.Completed ? "인계 경로 완료: 시작/재개로 반복하지 않습니다. 다음 개별 시험은 정지 후 권한을 반환하세요."
                     : "인계된 저장 경로 하나를 공통 시작/재개로 이어갑니다.";
@@ -139,6 +151,87 @@ namespace LineWatch.Editor
             }
             Refresh(); root.schedule.Execute(Refresh).Every(100);
             return root;
+        }
+
+        private static VisualElement CreateLossControls(CellRunController cell)
+        {
+            var panel = new Foldout { name = "cell-loss-panel", text = "손실 확정 · 삭제 원본만", value = false };
+            var tracker = cell.GetComponent<CellProductTracker>();
+            const string placeholder = "대상을 선택하세요";
+            ProductRecord selected = null;
+            bool updatingChoices = false, accepted = false;
+            string message = null;
+            var target = new DropdownField("상품 ID", new List<string> { placeholder }, 0) { name = "cell-loss-target" };
+            var reason = new TextField("손실 확정 사유") { name = "cell-loss-reason", multiline = true };
+            reason.style.minHeight = 48; reason.style.maxHeight = 100;
+            var selection = new Label { name = "cell-loss-selection" }; selection.style.whiteSpace = WhiteSpace.Normal;
+            var eligibility = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-loss-eligibility" };
+            var result = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-loss-request" };
+            panel.Add(new HelpBox("등록된 원래 GameObject가 삭제된 상품만 손실로 확정합니다. ID/사유/선택 당시 위치를 확인하세요. 대상 변경 시 사유는 비워집니다. Lost 이력과 ID는 남고 고장은 유지됩니다. 실제 보유나 미완료 경로가 있으면 거부합니다.", HelpBoxMessageType.Info));
+            panel.Add(target); panel.Add(reason); panel.Add(selection); panel.Add(eligibility);
+            Button confirm = null;
+            confirm = new Button(() =>
+            {
+                accepted = false;
+                if (cell == null || tracker == null) message = "셀/추적기 연결을 확인하세요.";
+                else if (selected == null) message = "손실 확정 대상을 선택하세요.";
+                else
+                {
+                    string id = selected.Id;
+                    // Use the location captured on explicit selection. Never replace the
+                    // operator's request with a newer record during scheduled refreshes.
+                    accepted = tracker.TryConfirmDestroyedLoss(id, selected.Location, reason.value, out var error);
+                    message = accepted ? id + " 손실 확정 기록 · 고장 해제는 별도 요청입니다." : error;
+                    if (accepted)
+                    {
+                        selected = null;
+                        target.SetValueWithoutNotify(placeholder);
+                        reason.SetValueWithoutNotify("");
+                    }
+                }
+                Refresh();
+            }) { name = "cell-loss-confirm", text = "선택 상품 손실 확정 · 기록 유지" };
+            confirm.style.minHeight = 28; panel.Add(confirm); panel.Add(result);
+            target.RegisterValueChangedCallback(evt =>
+            {
+                if (updatingChoices) return;
+                selected = null;
+                reason.SetValueWithoutNotify("");
+                if (tracker != null && evt.newValue.StartsWith("ID ") && tracker.TryGet(evt.newValue.Substring(3), out var record)) selected = record;
+                Refresh();
+            });
+            reason.RegisterValueChangedCallback(_ => Refresh());
+            void Refresh()
+            {
+                bool ready = Application.isPlaying && cell != null && cell.isActiveAndEnabled && tracker != null && tracker.isActiveAndEnabled;
+                target.SetEnabled(ready); reason.SetEnabled(ready);
+                var choices = new List<string> { placeholder };
+                if (ready)
+                    choices.AddRange(tracker.Snapshot().Where(r => r.Location == ProductLocation.Waiting || r.Location == ProductLocation.Input ||
+                        r.Location == ProductLocation.Scara || r.Location == ProductLocation.Handoff || r.Location == ProductLocation.Fanuc).Select(r => "ID " + r.Id));
+                string selectedChoice = selected == null ? placeholder : "ID " + selected.Id;
+                // Retain a now-terminal/stale selection visibly instead of silently
+                // switching to another ID. The API rejects its captured old location.
+                if (selected != null && !choices.Contains(selectedChoice)) choices.Add(selectedChoice);
+                if (!target.choices.SequenceEqual(choices))
+                {
+                    updatingChoices = true;
+                    try { target.choices = choices; target.SetValueWithoutNotify(selectedChoice); }
+                    finally { updatingChoices = false; }
+                }
+                selection.text = selected == null ? "선택된 상품 없음 · 대상은 자동 선택하지 않습니다."
+                    : selected.Id + " · 목적지 " + selected.Destination + " · 선택 당시 " + selected.Location + " / 현재 " +
+                        (tracker != null && tracker.TryGet(selected.Id, out var current) ? current.Location.ToString() : "확인 불가");
+                string why = !ready ? "활성 LineWatch Play에서 대상을 선택하세요." : selected == null ? "손실 확정 대상을 선택하세요." : null;
+                bool canConfirm = ready && selected != null && tracker.CanConfirmDestroyedLoss(selected.Id, selected.Location, reason.value, out why);
+                confirm.SetEnabled(canConfirm);
+                confirm.tooltip = canConfirm ? "실행 직전 삭제 증거·보유·경로와 선택 당시 위치를 다시 검사합니다." : why;
+                eligibility.text = canConfirm ? "삭제 증거와 운전 조건 확인 · ID/사유를 검토한 뒤 명시적으로 확정하세요." : why;
+                result.text = message ?? ""; result.messageType = accepted ? HelpBoxMessageType.Info : HelpBoxMessageType.Warning;
+                result.style.display = string.IsNullOrEmpty(message) ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+            Refresh(); panel.schedule.Execute(Refresh).Every(100);
+            return panel;
         }
 
         private static string RobotText(string id, RobotWaypointSequence sequence)

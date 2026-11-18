@@ -10,7 +10,7 @@ using UnityEditor;
 public static class VerifyProductRegistry
 {
     private static readonly string[] Sources = {
-        "Assets/01.Scenes/LineWatch.unity", "Assets/01.Scenes/RobotLab.unity",
+        "Assets/01.Scenes/LineWatch.unity",
         "ProjectSettings/ProjectSettings.asset", "ProjectSettings/EditorBuildSettings.asset",
         "Assets/03.Prefabs/ScaraRobot_Work.prefab", "Assets/03.Prefabs/FanucRobot_Work.prefab",
         "Assets/03.Prefabs/GripTrialPart.prefab", "Assets/03.Prefabs/HandoffTrialPart.prefab",

@@ -108,10 +108,19 @@ namespace LineWatch
         // can be acknowledged before its grip or while the same item is still held.
         internal bool CanAcknowledgeFault(CellRunController owner, out string error)
         {
+            if (owner == null || owner.ControlledSequence != this)
+            { error = "고장 경로를 복구 대상으로 먼저 인계하세요."; return false; }
+            return CanPrepareFaultRecovery(owner, out error);
+        }
+
+        // Read-only eligibility before command ownership is assigned. The same transport
+        // checks are used again for acknowledgement; neither query claims a physical item.
+        internal bool CanPrepareFaultRecovery(CellRunController owner, out string error)
+        {
             if (!CanReadRequest(out error)) return false;
             if (State != RunState.Faulted || owner == null || !owner.isActiveAndEnabled || !owner.IsFaulted ||
-                !cellGate.IsManagedBy(owner) || owner.ControlledSequence != this)
-            { error = "셀이 인계받은 고장 경로만 공통 해제할 수 있습니다."; return false; }
+                !cellGate.IsManagedBy(owner))
+            { error = "같은 활성 셀의 고장 경로만 복구 대상으로 준비할 수 있습니다."; return false; }
             if (IsPickPlace)
             {
                 bool beforeGrip = GripCount == 0 && ReleaseCount == 0 && StepIndex >= 0 && StepIndex <= 1;

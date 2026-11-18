@@ -85,8 +85,14 @@ namespace LineWatch
 
         public bool TryTakeControl(RobotWaypointSequence sequence, out string error)
         {
-            if (!Ready(out error) || !CanTakeControl(sequence, out error)) return false;
-            if (!sequence.TryValidateResume(out error)) return false;
+            if (!Application.isPlaying) { error = "Play 상태에서 셀 인계를 요청하세요."; return false; }
+            SynchronizeFault();
+            if (!CanTakeControl(sequence, out error)) return false;
+            if (IsFaulted)
+            {
+                if (!ValidateRecoveryPrograms(out error)) return false;
+            }
+            else if (!sequence.TryValidateResume(out error)) return false;
             controlledSequence = sequence;
             hasControlledSequence = true;
             return true;
@@ -125,6 +131,17 @@ namespace LineWatch
 
         public bool CanTakeControl(RobotWaypointSequence sequence, out string error)
         {
+            if (IsFaulted)
+            {
+                if (!CanPrepareRecovery(out error)) return false;
+                if (hasControlledSequence) { error = "이미 복구/운전 경로가 인계되어 있습니다. 대상을 교체하지 않습니다."; return false; }
+                if (sequence == null || sequence != scaraSequence && sequence != fanucSequence)
+                { error = "이 셀의 고장 경로만 복구 대상으로 인계할 수 있습니다."; return false; }
+                var otherFaultPath = sequence == scaraSequence ? fanucSequence : scaraSequence;
+                if (HasPendingSequence(otherFaultPath))
+                { error = "다른 로봇에도 미완료 경로가 있습니다. 여러 중단 경로의 복구는 별도 지원이 필요합니다."; return false; }
+                return sequence.CanPrepareFaultRecovery(this, out error);
+            }
             if (!CanReadReady(out error) || !ClockReady(out error) || !policy.CanIssueRobotCommand(CellRobotCommandSource.Manual, out error)) return false;
             if (hasControlledSequence) { error = "이미 공통 제어 경로가 있습니다. 정지 후 권한을 반환하세요."; return false; }
             if (sequence == null || sequence != scaraSequence && sequence != fanucSequence)
@@ -194,14 +211,14 @@ namespace LineWatch
             return true;
         }
 
-        private bool CanRecover(out string error)
+        // Shared readiness for acknowledging or explicitly adopting a stopped fault path.
+        // Preparing an adoption never clears a fault or dispatches a robot command.
+        private bool CanPrepareRecovery(out string error)
         {
             if (!policy.CanExecute(CellRunCommand.Reset, out error) || !ClockReady(out error)) return false;
             if (!isActiveAndEnabled || !Wired || hasControlledSequence && controlledSequence == null)
             { error = "셀 관리자·두 로봇·인계 경로·상품 추적 연결을 복원하세요."; return false; }
             if (!AtRest) { error = "두 로봇과 순차 운전을 정지한 뒤 고장을 해제하세요."; return false; }
-            foreach (var sequence in new[] { scaraSequence, fanucSequence })
-                if (sequence.State == RobotWaypointSequence.RunState.Faulted && !sequence.CanAcknowledgeFault(this, out error)) return false;
             if (!tracker.TryCheckPhysicalState(out error)) return false;
             foreach (var gripper in new[] { scaraGripper, fanucGripper })
                 if (gripper.HeldItem != null && (!gripper.HeldItem.IsReady || gripper.HeldItem.Owner != gripper))
@@ -209,9 +226,35 @@ namespace LineWatch
             return true;
         }
 
+        internal bool CanConfirmProductLoss(CellProductTracker requester, out string error)
+        {
+            error = null;
+            if (!Application.isPlaying || !isActiveAndEnabled || !IsFaulted || !Wired || requester != tracker)
+            { error = "같은 활성 셀의 Faulted 상태에서만 손실을 확정합니다."; return false; }
+            if (!ClockReady(out error)) return false;
+            if (!AtRest || hasControlledSequence || HasPendingSequence(scaraSequence) || HasPendingSequence(fanucSequence))
+            { error = "미완료/인계 경로가 있거나 로봇이 움직입니다. 저장된 상품 경로를 손실 처리로 무효화하지 않습니다."; return false; }
+            if (!ReferenceEquals(scaraGripper.HeldItem, null) || !ReferenceEquals(fanucGripper.HeldItem, null))
+            { error = "두 집게의 실제 보유를 비운 상태에서만 삭제된 상품의 손실을 확정합니다."; return false; }
+            return true;
+        }
+
+        private bool CanRecover(out string error)
+        {
+            if (!CanPrepareRecovery(out error)) return false;
+            foreach (var sequence in new[] { scaraSequence, fanucSequence })
+                if (sequence.State == RobotWaypointSequence.RunState.Faulted && !sequence.CanAcknowledgeFault(this, out error)) return false;
+            return true;
+        }
+
         private bool ValidateRecovery(out string error)
         {
             if (!CanRecover(out error)) return false;
+            return ValidateRecoveryPrograms(out error);
+        }
+
+        private bool ValidateRecoveryPrograms(out string error)
+        {
             if (!scara.TryReadFkDiagnostics(out var sd, out error) || !fanuc.TryReadFkDiagnostics(out var fd, out error)) return false;
             if (sd.PositionErrorMetres > .00001f || sd.YawErrorDegrees > .005f || fd.PositionErrorMetres > .00001f || fd.RotationErrorDegrees > .005f)
             { error = "실제 TCP와 FK가 일치하지 않습니다. 고장을 유지합니다."; return false; }

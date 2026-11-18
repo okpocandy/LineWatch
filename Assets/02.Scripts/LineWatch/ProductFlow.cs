@@ -59,6 +59,21 @@ namespace LineWatch
             return true;
         }
 
+        // Physical destruction and explicit operator intent are checked by the tracker.
+        // Keep the ID/receipt while releasing only this record's FIFO/slot occupancy.
+        public bool TryConfirmLoss(string id, ProductLocation expected, string reason, out ProductRecord product, out string error)
+        {
+            product = null; error = null;
+            if (!registry.TryGet(id, out var current)) { error = "등록되지 않은 상품입니다."; return false; }
+            if (current.Location != expected) { error = "상품의 현재 상태가 요청 시점과 다릅니다."; return false; }
+            if (slots.TryGetValue(expected, out var source) && source != id) { error = "상품 상태와 손실 지점의 점유가 맞지 않습니다."; return false; }
+            var remaining = expected == ProductLocation.Waiting ? new Queue<string>(waiting.Where(queued => queued != id)) : waiting;
+            if (!registry.TryConfirmLoss(id, expected, reason, out product, out error)) return false;
+            waiting = remaining;
+            if (slots.ContainsKey(expected)) slots[expected] = null;
+            return true;
+        }
+
         public bool TryRemove(string id, ProductLocation expected, out ProductRecord product, out string error)
         {
             product = null; error = null;

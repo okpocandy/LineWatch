@@ -14,7 +14,7 @@ public static class VerifyProductConservation
 {
     private sealed class Inventory
     {
-        public int Registered, CompletedA, CompletedB, Removed, VerifiedRemaining, Unresolved;
+        public int Registered, CompletedA, CompletedB, Removed, ConfirmedLost, VerifiedRemaining, Unresolved;
         public bool LogicalConsistent, EquationBalanced, PhysicalReconciled, TrackingHealthy;
         public bool TrackerFaulted;
         public readonly List<string> UnresolvedIds = new List<string>();
@@ -116,7 +116,7 @@ public static class VerifyProductConservation
                 sourceFiles = hashes.Count, sourceAssetsUnchanged = true, hashes, samples, directButtonClicks = 0,
                 scope = "Registered-product conservation and object/owner/slot reconciliation through explicit APIs. No automatic cell state machine, collision/force or 100-item integration claim." };
             Write("conservation-normal.json", report);
-            return JsonConvert.SerializeObject(new { report.passed, final.Registered, final.CompletedA, final.CompletedB, final.Removed, final.VerifiedRemaining,
+            return JsonConvert.SerializeObject(new { report.passed, final.Registered, final.CompletedA, final.CompletedB, final.Removed, final.ConfirmedLost, final.VerifiedRemaining,
                 final.Unresolved, checkpoints, report.rejectedRequestsPreserved, report.completedObjectDespawnPreservesHistory, report.sourceFiles, report.sourceAssetsUnchanged });
         }
         finally { Time.timeScale = scale; sg.Stop(); fg.Stop(); }
@@ -171,6 +171,15 @@ public static class VerifyProductConservation
         finally { Time.timeScale = scale; sg.Stop(); }
     }
 
+    public static object ConfirmedLossAudit()
+    {
+        var layout = Layout(); var audit = Audit(layout, layout.GetComponent<CellProductTracker>());
+        Require(audit.ConfirmedLost > 0 && audit.PhysicalReconciled && audit.EquationBalanced, "Loss-inclusive conservation audit failed: " + string.Join(";", audit.Issues));
+        var report = new { passed = true, audit.Registered, audit.CompletedA, audit.CompletedB, audit.Removed, audit.ConfirmedLost,
+            audit.VerifiedRemaining, audit.Unresolved, audit.PhysicalReconciled, audit.TrackingHealthy, audit.TrackerFaulted, audit.Rows };
+        Write("conservation-confirmed-loss.json", report); return report;
+    }
+
     private static Inventory Audit(LineWatchCellLayout layout, CellProductTracker tracker)
     {
         var result = new Inventory { Registered = tracker.Count, TrackerFaulted = tracker.IsFaulted };
@@ -195,7 +204,15 @@ public static class VerifyProductConservation
             if (record.Location == ProductLocation.Removed) result.Removed++;
             bool exists = tracker.TryGetItem(record.Id, out var item); string reason = null;
             if (exists && (!identities.Add(item.GetInstanceID()) || item.ProductId != record.Id || item.ProductTracker != tracker)) reason = "identity mismatch";
-            if (terminal)
+            if (record.Location == ProductLocation.Lost)
+            {
+                if (exists || string.IsNullOrWhiteSpace(record.LossReason) || !record.LostFrom.HasValue ||
+                    record.LostFrom == ProductLocation.OutputA || record.LostFrom == ProductLocation.OutputB || record.LostFrom == ProductLocation.Removed || record.LostFrom == ProductLocation.Lost)
+                    reason = "loss receipt/physical destruction mismatch";
+                if (reason == null) result.ConfirmedLost++;
+                else { result.Unresolved++; result.UnresolvedIds.Add(record.Id); }
+            }
+            else if (terminal)
             {
                 if (exists && item.Owner != null) reason = "terminal record is physically held";
             }
@@ -215,12 +232,12 @@ public static class VerifyProductConservation
                 else { result.Unresolved++; result.UnresolvedIds.Add(record.Id); }
             }
             if (reason != null) result.Issues.Add(record.Id + ":" + reason);
-            result.Rows.Add(new { record.Id, destination = record.Destination.ToString(), location = record.Location.ToString(), exists,
+            result.Rows.Add(new { record.Id, destination = record.Destination.ToString(), location = record.Location.ToString(), record.LostFrom, record.LossReason, exists,
                 owner = exists && item.Owner != null ? item.Owner.name : "none", position = exists ? V(item.Body.position) : null,
                 rotation = exists ? Q(item.Body.rotation) : null, reason });
         }
         result.LogicalConsistent = logical;
-        result.EquationBalanced = result.Registered == result.CompletedA + result.CompletedB + result.Removed + result.VerifiedRemaining + result.Unresolved;
+        result.EquationBalanced = result.Registered == result.CompletedA + result.CompletedB + result.Removed + result.ConfirmedLost + result.VerifiedRemaining + result.Unresolved;
         result.PhysicalReconciled = logical && result.EquationBalanced && result.Unresolved == 0 && result.Issues.Count == 0;
         result.TrackingHealthy = result.PhysicalReconciled && !tracker.IsFaulted && tracker.isActiveAndEnabled;
         return result;
