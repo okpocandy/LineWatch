@@ -55,7 +55,9 @@ namespace LineWatch
 
         public bool IsFaulted { get; private set; }
         public string FaultReason { get; private set; }
+        public string FaultProductId { get; private set; }
         public string LastAcknowledgedFaultReason { get; private set; }
+        public string LastAcknowledgedFaultProductId { get; private set; }
         public event Action<string> Faulted;
         public int Count => flow.Count;
         public string InputProductId => flow.InputProductId;
@@ -278,29 +280,33 @@ namespace LineWatch
         internal void OwnerCleared(GrippableItem item)
         {
             if (flow.TryGet(item.ProductId, out var record) && (record.Location == ProductLocation.Scara || record.Location == ProductLocation.Fanuc))
-                Fault("상품 " + record.Id + "의 실제 보유가 기록 갱신 없이 해제되었습니다.");
+                Fault("상품 " + record.Id + "의 실제 보유가 기록 갱신 없이 해제되었습니다.", record.Id);
         }
 
         internal void ItemUnavailable(GrippableItem item)
         {
-            if (flow.TryGet(item.ProductId, out var record) && !Terminal(record.Location)) Fault("상품 " + record.Id + "이 비활성화되거나 사라졌습니다.");
+            if (flow.TryGet(item.ProductId, out var record) && !Terminal(record.Location)) Fault("상품 " + record.Id + "이 비활성화되거나 사라졌습니다.", record.Id);
         }
 
         private void LateUpdate()
         {
             if (IsFaulted || products.Count == 0) return;
-            if (!TryCheckPhysicalState(out var error)) Fault(error);
+            if (!TryCheckPhysicalState(out var error, out var productId)) Fault(error, productId);
         }
 
         // Read the same physical evidence during normal monitoring and explicit recovery.
         // This query never clears a fault or changes the registry, owners or slot/FIFO data.
         internal bool TryCheckPhysicalState(out string error)
+            => TryCheckPhysicalState(out error, out _);
+
+        internal bool TryCheckPhysicalState(out string error, out string productId)
         {
-            error = null;
+            error = null; productId = null;
             if (!isActiveAndEnabled || !Wired) { error = "셀의 상품 추적 연결이 유효하지 않습니다."; return false; }
             foreach (var pair in products)
             {
                 flow.TryGet(pair.Key, out var record);
+                productId = record.Id;
                 var item = pair.Value.Item;
                 if (Terminal(record.Location))
                 {
@@ -318,6 +324,7 @@ namespace LineWatch
                 var station = record.Location == ProductLocation.Input ? layout.InputStop : record.Location == ProductLocation.Handoff ? layout.HandoffPoint : null;
                 if (station != null && !At(item, station)) { error = "상품 " + record.Id + "이 기록된 정지점에서 벗어났습니다."; return false; }
             }
+            productId = null;
             return true;
         }
 
@@ -336,7 +343,8 @@ namespace LineWatch
             if (IsFaulted)
             {
                 LastAcknowledgedFaultReason = FaultReason;
-                FaultReason = null;
+                LastAcknowledgedFaultProductId = FaultProductId;
+                FaultReason = null; FaultProductId = null;
                 IsFaulted = false;
             }
             return true;
@@ -369,10 +377,10 @@ namespace LineWatch
         private bool Wired => layout != null && layout.gameObject == gameObject && scaraGripper != null && fanucGripper != null &&
             scaraGripper.Scara == layout.Scara && fanucGripper.Fanuc == layout.Fanuc && layout.Scara.transform.IsChildOf(layout.transform) && layout.Fanuc.transform.IsChildOf(layout.transform) &&
             layout.InputStop != null && layout.HandoffPoint != null && layout.OutputA != null && layout.OutputB != null;
-        private void Fault(string reason)
+        private void Fault(string reason, string productId = null)
         {
             if (IsFaulted) return;
-            IsFaulted = true; FaultReason = reason;
+            IsFaulted = true; FaultReason = reason; FaultProductId = productId;
             if (scaraGripper != null) scaraGripper.Stop();
             if (fanucGripper != null) fanucGripper.Stop();
             Faulted?.Invoke(FaultReason);

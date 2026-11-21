@@ -91,6 +91,7 @@ namespace LineWatch
         public int StepCount => targets.Length;
         private int ReleaseStep => IsCellTransfer ? 4 : 3;
         public GrippableItem CycleItem => transportItem;
+        public string CycleProductId => cycleProductId;
         public int GripCount { get; private set; }
         public int ReleaseCount { get; private set; }
         public Pose LastReleasePose { get; private set; }

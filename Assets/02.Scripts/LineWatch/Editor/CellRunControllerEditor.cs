@@ -46,10 +46,11 @@ namespace LineWatch.Editor
             var state = new Label { name = "cell-run-state" };
             var owner = new Label { name = "cell-run-owner" };
             var automaticState = new Label { name = "cell-run-automatic-transfer" };
+            var progress = new Label { name = "cell-run-progress" };
             var scaraState = new Label { name = "cell-run-scara" };
             var fanucState = new Label { name = "cell-run-fanuc" };
             var products = new Label { name = "cell-run-products" };
-            foreach (var label in new[] { state, owner, automaticState, scaraState, fanucState, products })
+            foreach (var label in new[] { state, owner, automaticState, progress, scaraState, fanucState, products })
             { label.style.whiteSpace = WhiteSpace.Normal; label.style.marginTop = 6; root.Add(label); }
             var mode = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-run-mode" }; root.Add(mode);
             var fault = new HelpBox("", HelpBoxMessageType.Warning) { name = "cell-run-fault" }; root.Add(fault);
@@ -144,6 +145,7 @@ namespace LineWatch.Editor
                     foreach (var b in commands.Values.Concat(new[] { prepareAutomaticTransfer, prepareContinuousTransfer, prepareTransfer, prepareFanucTransfer, takeScara, takeFanuc, release })) b.SetEnabled(false);
                     transferPreview = null; transferTarget.text = "투입 상품 확인 불가";
                     automaticState.text = "자동 단품: 관리자 없음 · 상태 확인 불가";
+                    progress.text = "진행 시간: 관리자 없음 · 확인 불가";
                     fanucTransferPreview = null; fanucTransferTarget.text = "인계 상품 확인 불가";
                     state.text = "셀 상태: 관리자 없음 · 조작 차단"; owner.text = "명령 권한: 확인 불가";
                     scaraState.text = "SCARA: 관리자 없음 · 상태 확인 불가"; fanucState.text = "FANUC: 관리자 없음 · 상태 확인 불가";
@@ -154,6 +156,14 @@ namespace LineWatch.Editor
                 }
                 bool playing = Application.isPlaying;
                 state.text = playing ? "셀 상태: " + cell.State : "셀 상태: Play 대기";
+                progress.text = !playing || cell.ProgressKind == CellRunController.AutomaticProgressKind.None ? "진행 시간: 자동 운전 시작 후 표시"
+                    : (cell.ProgressKind == CellRunController.AutomaticProgressKind.NormalInputSupply ? cell.IsFaulted ? "공급 중단 · 고장 유지" : "정상 공급 대기" : "로봇 단계: " + cell.ProgressEquipmentId)
+                        + " · " + cell.ProgressStep + " · " + cell.ProgressProductId + "\n운전 중 경과: " + cell.ProgressActiveSeconds.ToString("F2")
+                        + "초 (시뮬레이션 시간) · " + (cell.IsProgressClockRunning ? "측정 중" : "측정 동결");
+                if (playing && cell.ProgressKind == CellRunController.AutomaticProgressKind.NormalInputSupply)
+                    progress.text += "\n공급 전진 없음: " + cell.SupplyNoProgressSeconds.ToString("F2") + "/" + CellRunController.SupplyNoProgressTimeoutSeconds.ToString("F2") + "초";
+                if (playing && cell.ProgressKind == CellRunController.AutomaticProgressKind.RobotStep)
+                    progress.text += "\n로봇 이동 진행 없음: " + cell.RobotNoProgressSeconds.ToString("F2") + "/" + CellRunController.RobotNoProgressTimeoutSeconds.ToString("F2") + "초";
                 string automaticPhase = cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.Scara ? "SCARA 운반/퇴피"
                     : cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.Fanuc ? "FANUC 배출"
                     : cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.WaitingForInput ? "투입 공급/정렬" : "완료";
@@ -221,6 +231,27 @@ namespace LineWatch.Editor
                     : "개별 경로 인계 상태 · 공통 시작/재개로 이어갑니다.";
                 fault.text = cell.IsFaulted ? "고장 유지: " + cell.FaultReason
                     : string.IsNullOrEmpty(cell.LastAcknowledgedFaultReason) ? "" : "최근 명시 해제: " + cell.LastAcknowledgedFaultReason;
+                var faultRecord = cell.IsFaulted ? cell.ActiveFault : cell.LastAcknowledgedFault;
+                if (faultRecord.HasValue)
+                {
+                    var info = faultRecord.Value;
+                    string source = info.Source == CellRunController.FaultSource.ProductTracker ? "상품 추적기"
+                        : info.Source == CellRunController.FaultSource.InputSupply ? "투입 공급"
+                        : info.Source == CellRunController.FaultSource.Cell ? "셀 관리자" : info.EquipmentId ?? "설비 ID 확인 필요";
+                    fault.text += "\n발생 출처: " + source + " · 단계: " + info.Step
+                        + "\n운전 대상 상품: " + (info.OperationProductId ?? "없음/확인 필요");
+                    if (info.Source == CellRunController.FaultSource.ProductTracker || info.CauseProductId != null)
+                        fault.text += "\n원인 상품: " + (info.CauseProductId ?? "특정되지 않음");
+                }
+                if (cell.IsFaulted)
+                {
+                    fault.text += reset.enabledSelf
+                        ? "\n해제 요청 가능 · 실행 시 실제 자세와 저장 경로를 다시 검사합니다."
+                        : "\n해제 요청 차단: " + reset.tooltip;
+                    fault.text += "\n원인을 복원한 뒤 '고장 해제 · 기록 유지'를 요청하세요. 상품 정리/경로 종료가 필요하면 복구·초기화(고급)를 확인하세요.";
+                }
+                else if (!string.IsNullOrEmpty(cell.LastAcknowledgedFaultReason))
+                    fault.text += "\n명시 해제 이력입니다. 자동 재시작하지 않습니다. 준비 상태를 확인한 뒤 별도로 시작하세요.";
                 fault.messageType = cell.IsFaulted ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info;
                 fault.style.display = string.IsNullOrEmpty(fault.text) ? DisplayStyle.None : DisplayStyle.Flex;
                 request.text = requestMessage ?? ""; request.messageType = requestAccepted ? HelpBoxMessageType.Info : HelpBoxMessageType.Warning;

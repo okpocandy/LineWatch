@@ -26,6 +26,7 @@ namespace LineWatch
         private CellCommandGate cellGate;
         private void Awake() { cellGate = new CellCommandGate(this); }
         public bool IsTcpMoving => activeMotion != null;
+        public double AppliedMotionSeconds { get; private set; }
         public string LastMotionError { get; private set; }
         public uint CommandVersion { get; private set; }
 
@@ -256,6 +257,7 @@ namespace LineWatch
             // Commit only after every axis and the whole straight joint-space segment are valid.
             CommandVersion++;
             activeMotion = candidate;
+            AppliedMotionSeconds = 0;
             LastMotionError = null;
             for (int i = 0; i < 6; i++) candidate.Axes[i].BeginCoordinated(candidate.End[i]);
             if (candidate.Duration == 0)
@@ -296,6 +298,7 @@ namespace LineWatch
                 plan.Axes[i].ApplyCoordinated(plan.Next[i], complete);
                 plan.Applied[i] = plan.Next[i];
             }
+            AppliedMotionSeconds = elapsed;
             if (complete) activeMotion = null;
         }
 

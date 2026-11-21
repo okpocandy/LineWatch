@@ -10,6 +10,21 @@ namespace LineWatch
     public sealed class CellRunController : MonoBehaviour
     {
         public enum AutomaticTransferPhase { None, Scara, Fanuc, Completed, WaitingForInput }
+        public enum AutomaticProgressKind { None, NormalInputSupply, RobotStep }
+        public enum FaultSource { Cell, ProductTracker, Scara, Fanuc, InputSupply }
+        public const float SupplyNoProgressTimeoutSeconds = 2f;
+        public const float RobotNoProgressTimeoutSeconds = 2f;
+        public readonly struct FaultRecord
+        {
+            public FaultSource Source { get; }
+            public string EquipmentId { get; }
+            public string OperationProductId { get; }
+            public string CauseProductId { get; }
+            public string Step { get; }
+            public string Reason { get; }
+            internal FaultRecord(FaultSource source, string equipmentId, string productId, string causeProductId, string step, string reason)
+            { Source = source; EquipmentId = equipmentId; OperationProductId = productId; CauseProductId = causeProductId; Step = step; Reason = reason; }
+        }
         private readonly CellRunStateMachine policy = new CellRunStateMachine();
         private LineWatchCellLayout layout;
         private CellProductTracker tracker;
@@ -23,16 +38,33 @@ namespace LineWatch
         private bool automaticHandoffPreparation;
         private bool automaticInputPreparation;
         private ProductDestination automaticDestination;
+        private AutomaticTransferPhase observedPhase;
+        private uint observedProgramRevision;
+        private int observedStepIndex = -1;
+        private bool supplySampled;
+        private float bestSupplyDistance, bestSupplyAngle;
+        private uint observedRobotCommand;
+        private double observedAppliedSeconds;
 
         public AutomaticTransferPhase AutomaticPhase { get; private set; }
         public string AutomaticProductId { get; private set; }
         public bool IsAutomaticContinuous { get; private set; }
         public ProductDestination? AutomaticDestination => AutomaticPhase == AutomaticTransferPhase.None ? (ProductDestination?)null : automaticDestination;
+        public AutomaticProgressKind ProgressKind { get; private set; }
+        public double ProgressActiveSeconds { get; private set; }
+        public string ProgressProductId { get; private set; }
+        public string ProgressEquipmentId { get; private set; }
+        public string ProgressStep { get; private set; }
+        public double SupplyNoProgressSeconds { get; private set; }
+        public double RobotNoProgressSeconds { get; private set; }
+        public bool IsProgressClockRunning => ProgressKind != AutomaticProgressKind.None && State == CellRunState.Running && ClockReady(out _);
 
         public CellRunState State => policy.State;
         public string FaultReason => policy.FaultReason;
         public string LastAcknowledgedFaultReason => policy.LastAcknowledgedFaultReason;
         public bool IsFaulted => policy.IsFaulted;
+        public FaultRecord? ActiveFault { get; private set; }
+        public FaultRecord? LastAcknowledgedFault { get; private set; }
         public bool HasControlledSequence => hasControlledSequence;
         public RobotWaypointSequence ControlledSequence => controlledSequence;
 
@@ -64,7 +96,10 @@ namespace LineWatch
                 if (!tracker.TryAcknowledgeFault(this, out error)) return false;
                 if (hasControlledSequence && controlledSequence.State == RobotWaypointSequence.RunState.Faulted)
                     controlledSequence.AcknowledgeFaultFromCell();
-                return policy.TryExecute(command, out error);
+                if (!policy.TryExecute(command, out error)) return false;
+                LastAcknowledgedFault = ActiveFault; ActiveFault = null;
+                ClearProgress();
+                return true;
             }
             bool resumePath = false;
             if ((command == CellRunCommand.Start || command == CellRunCommand.Resume) && hasControlledSequence && controlledSequence.State != RobotWaypointSequence.RunState.Completed)
@@ -85,7 +120,7 @@ namespace LineWatch
             try
             {
                 if (controlledSequence.TryResumeFromCell(this, out error)) return true;
-                Fault(error); return false;
+                Fault(error, controlledSequence == scaraSequence ? FaultSource.Scara : FaultSource.Fanuc); return false;
             }
             finally { resumeDispatchInProgress = false; }
         }
@@ -477,7 +512,7 @@ namespace LineWatch
             if (!IsAutomaticContinuous || AutomaticPhase != AutomaticTransferPhase.WaitingForInput || State != CellRunState.Running || !ClockReady(out _)) return;
             SynchronizeFault();
             if (IsFaulted) return;
-            if (!tracker.TryCheckPhysicalState(out var error)) { Fault(error); return; }
+            if (!tracker.TryCheckPhysicalState(out var error, out var causeProductId)) { Fault(error, FaultSource.ProductTracker, causeProductId); return; }
             if (tracker.InputProductId != null) return; // A retained Input record is retried by Update after explicit recovery.
             automaticInputPreparation = true;
             try
@@ -490,17 +525,19 @@ namespace LineWatch
         private void Update()
         {
             SynchronizeFault();
+            UpdateProgress();
             if (State != CellRunState.Running || !hasControlledSequence || !ClockReady(out _)) return;
             if (AutomaticPhase == AutomaticTransferPhase.WaitingForInput)
             {
-                if (!tracker.TryCheckPhysicalState(out var error)) { Fault(error); return; }
+                if (!tracker.TryCheckPhysicalState(out var error, out var causeProductId)) { Fault(error, FaultSource.ProductTracker, causeProductId); return; }
                 if (tracker.InputProductId == null)
                 {
                     var waiting = tracker.WaitingSnapshot();
                     if (waiting.Count == 0 || waiting[0] != AutomaticProductId)
                     { Fault("대기하던 선두 상품이 바뀌었습니다. 자동 대상을 교체하지 않습니다."); return; }
-                    if (!tracker.IsNextWaitingAligned()) return;
+                    if (!tracker.IsNextWaitingAligned()) { CheckSupplyProgress(); return; }
                 }
+                ClearSupplyProgress();
                 bool prepared;
                 automaticInputPreparation = true;
                 try
@@ -523,7 +560,8 @@ namespace LineWatch
                     !tracker.TryGetItem(AutomaticProductId, out var item) || item != scaraSequence.CycleItem ||
                     !AtRest || scaraGripper.HeldItem != null || fanucGripper.HeldItem != null)
                 { Fault("자동 인계 상품·원래 실물·목적지·두 집게의 정지/보유를 확인하세요."); return; }
-                if (!tracker.TryCheckPhysicalState(out var error) || !TryCheckScaraRetreat(out error)) { Fault(error); return; }
+                if (!tracker.TryCheckPhysicalState(out var error, out var causeProductId)) { Fault(error, FaultSource.ProductTracker, causeProductId); return; }
+                if (!TryCheckScaraRetreat(out error)) { Fault(error); return; }
                 // Preparation is atomic. Keep the SCARA permission if FANUC validation fails.
                 bool prepared;
                 automaticHandoffPreparation = true;
@@ -571,15 +609,99 @@ namespace LineWatch
         private void ClearAutomaticTransfer()
         {
             AutomaticPhase = AutomaticTransferPhase.None; AutomaticProductId = null; IsAutomaticContinuous = false;
+            ClearProgress();
+        }
+        private void ClearProgress()
+        {
+            ClearSupplyProgress();
+            ClearRobotProgress();
+            ProgressKind = AutomaticProgressKind.None; ProgressActiveSeconds = 0;
+            ProgressProductId = null; ProgressEquipmentId = null; ProgressStep = null;
+            observedPhase = AutomaticTransferPhase.None; observedProgramRevision = 0; observedStepIndex = -1;
+        }
+        private void UpdateProgress()
+        {
+            if (AutomaticPhase == AutomaticTransferPhase.None || AutomaticPhase == AutomaticTransferPhase.Completed)
+            { ClearProgress(); return; }
+            if (State != CellRunState.Running || !hasControlledSequence || !ClockReady(out _)) return;
+            bool supplying = AutomaticPhase == AutomaticTransferPhase.WaitingForInput;
+            var sequence = AutomaticPhase == AutomaticTransferPhase.Scara ? scaraSequence : fanucSequence;
+            uint revision = supplying ? 0 : sequence.ProgramRevision;
+            int step = supplying ? -1 : sequence.StepIndex;
+            if (observedPhase != AutomaticPhase || ProgressProductId != AutomaticProductId || observedProgramRevision != revision || observedStepIndex != step)
+            {
+                ClearSupplyProgress();
+                ClearRobotProgress();
+                ProgressActiveSeconds = 0;
+                observedPhase = AutomaticPhase; observedProgramRevision = revision; observedStepIndex = step;
+            }
+            ProgressKind = supplying ? AutomaticProgressKind.NormalInputSupply : AutomaticProgressKind.RobotStep;
+            ProgressProductId = AutomaticProductId;
+            ProgressEquipmentId = supplying ? null : AutomaticPhase == AutomaticTransferPhase.Scara ? layout.ScaraId : layout.FanucId;
+            ProgressStep = supplying ? "선두 상품 공급 중" : sequence.StepName;
+            // Scaled simulation seconds, matching motion; distinct from time without actual supply progress.
+            ProgressActiveSeconds += Time.deltaTime;
+            if (!supplying) CheckRobotProgress(sequence);
+        }
+        private void ClearRobotProgress()
+        {
+            observedRobotCommand = 0; observedAppliedSeconds = 0; RobotNoProgressSeconds = 0;
+        }
+        private void CheckRobotProgress(RobotWaypointSequence sequence)
+        {
+            bool isScara = sequence == scaraSequence;
+            if (sequence.State != RobotWaypointSequence.RunState.Running || !(isScara ? scara.IsTrajectoryMoving : fanuc.IsTcpMoving)) return;
+            uint command = isScara ? scara.CommandVersion : fanuc.CommandVersion;
+            double applied = isScara ? scara.AppliedMotionSeconds : fanuc.AppliedMotionSeconds;
+            if (observedRobotCommand != command)
+            {
+                observedRobotCommand = command; observedAppliedSeconds = 0;
+                // A resume replans from the current pose. Preserve the stalled time until it actually advances.
+            }
+            if (applied > observedAppliedSeconds)
+            {
+                observedAppliedSeconds = applied; RobotNoProgressSeconds = 0;
+                return;
+            }
+            RobotNoProgressSeconds += Time.deltaTime;
+            if (RobotNoProgressSeconds >= RobotNoProgressTimeoutSeconds)
+                Fault(ProgressEquipmentId + "의 " + sequence.StepName + " 이동이 " + RobotNoProgressSeconds.ToString("F2")
+                    + "초 동안 진행되지 않았습니다. 실제 로봇 구동을 확인하세요.", isScara ? FaultSource.Scara : FaultSource.Fanuc);
+        }
+        private void ClearSupplyProgress()
+        {
+            supplySampled = false; bestSupplyDistance = 0; bestSupplyAngle = 0; SupplyNoProgressSeconds = 0;
+        }
+        private void CheckSupplyProgress()
+        {
+            if (!tracker.TryGetItem(AutomaticProductId, out var item)) return; // Physical validation reports missing originals first.
+            float distance = Vector3.Distance(item.Body.position, layout.InputStop.position);
+            float angle = RobotGripper.RotationError(item.Body.rotation, layout.InputStop.rotation);
+            if (!supplySampled)
+            {
+                supplySampled = true; bestSupplyDistance = distance; bestSupplyAngle = angle;
+                return;
+            }
+            // Keep the best evidence so back-and-forth jitter cannot repeatedly restart the clock.
+            if (distance <= bestSupplyDistance - .0001f || angle <= bestSupplyAngle - .05f)
+            {
+                bestSupplyDistance = Mathf.Min(bestSupplyDistance, distance); bestSupplyAngle = Mathf.Min(bestSupplyAngle, angle);
+                SupplyNoProgressSeconds = 0;
+                return;
+            }
+            SupplyNoProgressSeconds += Time.deltaTime;
+            if (SupplyNoProgressSeconds >= SupplyNoProgressTimeoutSeconds)
+                Fault("선두 상품 " + AutomaticProductId + "의 공급이 " + SupplyNoProgressSeconds.ToString("F2")
+                    + "초 동안 진행되지 않았습니다. 실제 공급/정렬을 확인하세요.", FaultSource.InputSupply);
         }
         private void SynchronizeFault()
         {
             if (!Application.isPlaying || IsFaulted) return;
-            if (tracker != null && tracker.IsFaulted) { Fault(tracker.FaultReason); return; }
-            if (!isActiveAndEnabled || !Wired) { Fault("셀 운전 관리자 또는 두 로봇/상품 추적 연결이 유효하지 않습니다."); return; }
+            if (tracker != null && tracker.IsFaulted) { Fault(tracker.FaultReason, FaultSource.ProductTracker, tracker.FaultProductId); return; }
+            if (!isActiveAndEnabled || !Wired) { Fault("셀 운전 관리자 또는 두 로봇/상품 추적 연결이 유효하지 않습니다.", WiringFaultSource()); return; }
             if (hasControlledSequence && controlledSequence == null) { Fault("공통 제어에 인계된 로봇 경로가 사라졌습니다."); return; }
-            if (scaraSequence.State == RobotWaypointSequence.RunState.Faulted) Fault(scaraSequence.LastError);
-            else if (fanucSequence.State == RobotWaypointSequence.RunState.Faulted) Fault(fanucSequence.LastError);
+            if (scaraSequence.State == RobotWaypointSequence.RunState.Faulted) Fault(scaraSequence.LastError, FaultSource.Scara);
+            else if (fanucSequence.State == RobotWaypointSequence.RunState.Faulted) Fault(fanucSequence.LastError, FaultSource.Fanuc);
             else if (!resumeDispatchInProgress && hasControlledSequence && State == CellRunState.Running && controlledSequence.State == RobotWaypointSequence.RunState.Paused)
             {
                 // Individual Stop/Pause remains available. Reflect its interruption at cell
@@ -588,10 +710,26 @@ namespace LineWatch
                 StopBoth();
             }
         }
-        private void OnTrackerFault(string reason) => Fault(reason);
-        private void Fault(string reason)
+        private void OnTrackerFault(string reason) => Fault(reason, FaultSource.ProductTracker, tracker.FaultProductId);
+        private FaultSource WiringFaultSource()
+        {
+            if (!isActiveAndEnabled || layout == null) return FaultSource.Cell;
+            if (tracker == null || !tracker.isActiveAndEnabled) return FaultSource.ProductTracker;
+            bool scaraReady = scara != null && layout.Scara == scara && scara.transform.IsChildOf(transform) && scara.IsReady &&
+                scaraGripper != null && scaraGripper.IsReady && scaraSequence != null && scaraSequence.IsReady;
+            bool fanucReady = fanuc != null && layout.Fanuc == fanuc && fanuc.transform.IsChildOf(transform) && fanuc.IsReady &&
+                fanucGripper != null && fanucGripper.IsReady && fanucSequence != null && fanucSequence.IsReady;
+            return !scaraReady && fanucReady ? FaultSource.Scara : scaraReady && !fanucReady ? FaultSource.Fanuc : FaultSource.Cell;
+        }
+        private void Fault(string reason, FaultSource source = FaultSource.Cell, string causeProductId = null)
         {
             if (!policy.TryFault(string.IsNullOrWhiteSpace(reason) ? "셀 운전 오류가 발생했습니다." : reason, out _)) return;
+            var sequence = source == FaultSource.Scara ? scaraSequence : source == FaultSource.Fanuc ? fanucSequence : null;
+            string equipmentId = source == FaultSource.Scara ? layout.ScaraId : source == FaultSource.Fanuc ? layout.FanucId : null;
+            ActiveFault = new FaultRecord(source, equipmentId, sequence != null ? sequence.CycleProductId : AutomaticProductId,
+                source == FaultSource.InputSupply ? AutomaticProductId : causeProductId,
+                sequence != null ? sequence.State == RobotWaypointSequence.RunState.Idle ? "대기" : sequence.StepName
+                    : source == FaultSource.InputSupply ? "선두 상품 공급 중" : AutomaticPhase.ToString(), policy.FaultReason);
             StopBoth();
         }
         private void StopBoth()

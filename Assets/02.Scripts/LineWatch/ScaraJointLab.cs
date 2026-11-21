@@ -30,6 +30,7 @@ namespace LineWatch
         private float segmentElapsed;
 
         public bool IsTrajectoryMoving => activePlan != null;
+        public double AppliedMotionSeconds { get; private set; }
         public string LastMotionError { get; private set; }
         public uint CommandVersion { get; private set; }
         public ScaraForwardKinematics.Geometry Geometry => ReadGeometry();
@@ -233,6 +234,7 @@ namespace LineWatch
             // Commit only the complete validated plan; a failed replacement preserves the old one.
             CommandVersion++;
             activePlan = plan;
+            AppliedMotionSeconds = 0;
             plannedSpeeds = CurrentSpeeds();
             segmentIndex = 1;
             segmentElapsed = 0f;
@@ -272,6 +274,7 @@ namespace LineWatch
                 axis2.ApplyCoordinated(position.Q2Degrees, complete);
                 axis3.ApplyCoordinated(position.D3Metres, complete);
                 axis4.ApplyCoordinated(position.Q4Degrees, complete);
+                AppliedMotionSeconds += step;
                 if (complete) { activePlan = null; break; }
                 if (segmentDone) { segmentIndex++; segmentElapsed = 0f; }
                 if (remaining <= 0f) break;
