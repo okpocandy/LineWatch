@@ -18,7 +18,15 @@ namespace LineWatch
         private void Awake() { cellGate = new CellCommandGate(this); }
         private ScaraJointLab scaraOwner;
         private FanucJointLab fanucOwner;
-        private readonly Pose[] targets = new Pose[4];
+        private Pose[] targets = new Pose[4];
+        private LineWatchCellLayout transferLayout;
+        private RobotWaypointSet transferDropSource;
+        private RobotWaypointSet transferPickSource;
+        private CellRunController transferCoordinator;
+        private CellProductTracker transferTracker;
+        private ProductDestination transferDestination;
+        private Transform transferInput, transferDrop;
+        private Pose transferInputPose, transferDropPose;
         private uint ownedVersion;
         private ScaraForwardKinematics.Geometry scaraGeometry;
         private RobotGripper transportGripper;
@@ -39,6 +47,9 @@ namespace LineWatch
             public Pose LastArrivalPose { get; }
             public Pose LastReleasePose { get; }
             public bool IsPickPlace { get; }
+            public bool IsCellTransfer { get; }
+            public bool IsFanucTransfer { get; }
+            public ProductDestination? FanucDestination { get; }
             public int GripCount { get; }
             public int ReleaseCount { get; }
             public string FaultReason { get; }
@@ -51,6 +62,9 @@ namespace LineWatch
                 PreviousState = sequence.State; StepIndex = sequence.StepIndex;
                 LastArrivedStepIndex = sequence.LastArrivedStepIndex; LastArrivalPose = sequence.LastArrivalPose;
                 LastReleasePose = sequence.LastReleasePose; IsPickPlace = sequence.IsPickPlace;
+                IsCellTransfer = sequence.IsCellTransfer;
+                IsFanucTransfer = sequence.IsFanucTransfer;
+                FanucDestination = sequence.FanucDestination;
                 GripCount = sequence.GripCount; ReleaseCount = sequence.ReleaseCount; FaultReason = sequence.LastError;
                 ProgramRevision = sequence.ProgramRevision;
                 Targets = Array.AsReadOnly((Pose[])sequence.targets.Clone());
@@ -71,11 +85,22 @@ namespace LineWatch
         public bool IsBusy => State == RunState.Running || State == RunState.Acting;
         public bool HasPendingProgram => State != RunState.Idle && State != RunState.Completed && State != RunState.Cancelled;
         public bool IsPickPlace { get; private set; }
+        public bool IsCellTransfer { get; private set; }
+        public bool IsFanucTransfer => IsCellTransfer && fanucOwner != null;
+        public ProductDestination? FanucDestination => IsFanucTransfer ? transferDestination : (ProductDestination?)null;
+        public int StepCount => targets.Length;
+        private int ReleaseStep => IsCellTransfer ? 4 : 3;
         public GrippableItem CycleItem => transportItem;
         public int GripCount { get; private set; }
         public int ReleaseCount { get; private set; }
         public Pose LastReleasePose { get; private set; }
-        public string StepName => StepIndex == 0 ? "접근" : StepIndex == 1 ? "작업" : StepIndex == 2 ? "상승" : StepIndex == 3 ? "퇴피" : "완료";
+        public string StepName => IsFanucTransfer
+            ? StepIndex == 0 ? "인계 접근" : StepIndex == 1 ? "인계 집기" : StepIndex == 2 ? "인계 상승" :
+                StepIndex == 3 ? $"{transferDestination} 출구 접근" : StepIndex == 4 ? $"{transferDestination} 출구 놓기" : StepIndex == 5 ? $"{transferDestination} 출구 상승" : StepIndex == 6 ? $"{transferDestination} 출구 퇴피" : "완료"
+            : IsCellTransfer
+            ? StepIndex == 0 ? "투입 접근" : StepIndex == 1 ? "투입 집기" : StepIndex == 2 ? "투입 상승" :
+                StepIndex == 3 ? "인계 접근" : StepIndex == 4 ? "인계 놓기" : StepIndex == 5 ? "인계 상승" : StepIndex == 6 ? "인계 퇴피" : "완료"
+            : StepIndex == 0 ? "접근" : StepIndex == 1 ? "작업" : StepIndex == 2 ? "상승" : StepIndex == 3 ? "퇴피" : "완료";
         public bool IsReady => isActiveAndEnabled && waypoints != null &&
             ((scara != null && fanuc == null && scara.IsReady && waypoints.Robot == RobotWaypointSet.RobotType.Scara) ||
              (fanuc != null && scara == null && fanuc.IsReady && waypoints.Robot == RobotWaypointSet.RobotType.Fanuc));
@@ -105,15 +130,100 @@ namespace LineWatch
             if (!Dispatch(scara, fanuc, candidate[0], 0, out error)) return false;
             source = waypoints; scaraOwner = scara; fanucOwner = fanuc;
             ProgramRevision++;
-            Array.Copy(candidate, targets, 4);
+            targets = candidate;
             if (scaraOwner != null) scaraGeometry = scaraOwner.Geometry;
             ownedVersion = Version;
             StepIndex = 0; LastError = null; State = RunState.Running;
             LastArrivedStepIndex = -1;
             IsPickPlace = gripper != null; transportGripper = gripper; transportItem = item;
+            IsCellTransfer = false; transferLayout = null; transferDropSource = null; transferInput = null; transferDrop = null;
+            transferPickSource = null; transferCoordinator = null; transferTracker = null;
             cycleProductId = item != null ? item.ProductId : null; programName = source.name;
             GripCount = 0; ReleaseCount = 0;
             return true;
+        }
+
+        internal bool TryPrepareScaraTransfer(CellRunController owner, LineWatchCellLayout layout, RobotGripper gripper, GrippableItem item, out string error)
+        {
+            if (!CanReadRequest(out error)) return false;
+            if (!cellGate.IsManagedBy(owner) || !(owner.State == CellRunState.Stopped && !owner.HasControlledSequence || owner.AllowsAutomaticInputPreparation(this)) ||
+                layout == null || layout.GetComponent<CellRunController>() != owner || layout.Scara != scara || fanuc != null ||
+                HasPendingProgram || !AtRest(scara, null))
+            { error = "같은 정지 셀의 빈 SCARA 경로만 준비할 수 있습니다."; return false; }
+            var drop = layout.ScaraHandoffWaypoints;
+            if (layout.InputStop == null || layout.HandoffPoint == null || drop == null || drop.Robot != RobotWaypointSet.RobotType.Scara ||
+                gripper == null || gripper.gameObject != gameObject || gripper.Scara != scara || gripper.Fanuc != null ||
+                item == null || !item.IsReady || item.ProductTracker != layout.GetComponent<CellProductTracker>())
+            { error = "투입/인계 지점·SCARA·등록된 원래 상품 연결을 확인하세요."; return false; }
+            if (!waypoints.TryValidate(out error) || !drop.TryValidate(out error)) return false;
+            var pickWork = StationWork(gripper, item, layout.InputStop);
+            var dropWork = StationWork(gripper, item, layout.HandoffPoint);
+            if (Vector3.Distance(dropWork.position, drop.Work.PositionMetres) > .00001f || Angle(dropWork.rotation, drop.Work.Rotation) > .005f)
+            { error = "인계 경유점과 실제 상품/집게의 인계 기준이 일치하지 않습니다."; return false; }
+            var lift = drop.Approach.PositionMetres - drop.Work.PositionMetres;
+            if (lift.y <= 0 || Mathf.Abs(lift.x) > .00001f || Mathf.Abs(lift.z) > .00001f)
+            { error = "인계 접근점은 작업점 바로 위에 있어야 합니다."; return false; }
+            var pickApproach = new Pose(pickWork.position + lift, pickWork.rotation);
+            var candidate = new[] { pickApproach, pickWork, pickApproach, new Pose(drop.Approach.PositionMetres, drop.Approach.Rotation),
+                new Pose(drop.Work.PositionMetres, drop.Work.Rotation), new Pose(drop.Approach.PositionMetres, drop.Approach.Rotation),
+                new Pose(drop.Retreat.PositionMetres, drop.Retreat.Rotation) };
+            if (!gripper.TryCheckPlannedGrip(item, pickWork, out error) || !Preflight(scara, null, candidate, 0, out error)) return false;
+            // Commit only after every product, grip and path check. Preparation emits no command.
+            targets = candidate; source = waypoints; scaraOwner = scara; fanucOwner = null;
+            scaraGeometry = scara.Geometry; ownedVersion = Version;
+            IsPickPlace = true; IsCellTransfer = true; transportGripper = gripper; transportItem = item;
+            cycleProductId = item.ProductId; programName = "SCARA 투입→인계";
+            transferLayout = layout; transferDropSource = drop; transferInput = layout.InputStop; transferDrop = layout.HandoffPoint;
+            transferPickSource = null; transferCoordinator = owner; transferTracker = item.ProductTracker;
+            transferInputPose = new Pose(transferInput.position, transferInput.rotation); transferDropPose = new Pose(transferDrop.position, transferDrop.rotation);
+            StepIndex = 0; LastArrivedStepIndex = -1; LastError = null; GripCount = 0; ReleaseCount = 0;
+            LastArrivalPose = default; LastReleasePose = default; State = RunState.Paused; ProgramRevision++;
+            return true;
+        }
+
+        internal bool TryPrepareFanucTransfer(CellRunController owner, LineWatchCellLayout layout, RobotGripper gripper, GrippableItem item, ProductDestination destination, out string error)
+        {
+            if (!CanReadRequest(out error)) return false;
+            if (!cellGate.IsManagedBy(owner) || !(owner.State == CellRunState.Stopped && !owner.HasControlledSequence || owner.AllowsAutomaticHandoffPreparation(this)) ||
+                layout == null || layout.GetComponent<CellRunController>() != owner || layout.Fanuc != fanuc || scara != null ||
+                HasPendingProgram || !AtRest(null, fanuc))
+            { error = "같은 정지 셀의 빈 FANUC 경로만 준비할 수 있습니다."; return false; }
+            var pick = layout.FanucHandoffWaypoints;
+            var output = destination == ProductDestination.A ? layout.OutputA : destination == ProductDestination.B ? layout.OutputB : null;
+            if (layout.HandoffPoint == null || output == null || pick == null || pick.Robot != RobotWaypointSet.RobotType.Fanuc ||
+                gripper == null || !gripper.IsReady || gripper.gameObject != gameObject || gripper.Fanuc != fanuc || gripper.Scara != null ||
+                item == null || !item.IsReady || item.ProductTracker != layout.GetComponent<CellProductTracker>())
+            { error = "인계/출구·FANUC·등록된 원래 상품 연결을 확인하세요."; return false; }
+            if (!waypoints.TryValidate(out error) || !pick.TryValidate(out error) || !owner.TryCheckScaraRetreat(out error)) return false;
+            var pickWork = StationWork(gripper, item, layout.HandoffPoint);
+            if (Vector3.Distance(pickWork.position, pick.Work.PositionMetres) > .00001f || Angle(pickWork.rotation, pick.Work.Rotation) > .005f)
+            { error = "인계 경유점과 원래 상품/집게의 집기 기준이 다릅니다."; return false; }
+            var dropWork = StationWork(gripper, item, output);
+            var lift = pick.Approach.PositionMetres - pick.Work.PositionMetres;
+            var approach = new Pose(dropWork.position + lift, dropWork.rotation);
+            var retreat = new Pose(dropWork.position + (pick.Retreat.PositionMetres - pick.Work.PositionMetres), dropWork.rotation);
+            var candidate = new[] { new Pose(pick.Approach.PositionMetres, pick.Approach.Rotation), new Pose(pick.Work.PositionMetres, pick.Work.Rotation),
+                new Pose(pick.Approach.PositionMetres, pick.Approach.Rotation), approach, dropWork, approach, retreat };
+            if (!gripper.TryCheckPlannedGrip(item, candidate[1], out error) || !Preflight(null, fanuc, candidate, 0, out error)) return false;
+            targets = candidate; source = waypoints; scaraOwner = null; fanucOwner = fanuc; ownedVersion = Version;
+            IsPickPlace = true; IsCellTransfer = true; transportGripper = gripper; transportItem = item;
+            cycleProductId = item.ProductId; transferDestination = destination; programName = $"FANUC 인계→{destination}";
+            transferLayout = layout; transferDropSource = null; transferPickSource = pick; transferCoordinator = owner; transferTracker = item.ProductTracker;
+            transferInput = layout.HandoffPoint; transferDrop = output;
+            transferInputPose = new Pose(transferInput.position, transferInput.rotation); transferDropPose = new Pose(transferDrop.position, transferDrop.rotation);
+            StepIndex = 0; LastArrivedStepIndex = -1; LastError = null; GripCount = 0; ReleaseCount = 0;
+            LastArrivalPose = default; LastReleasePose = default; State = RunState.Paused; ProgramRevision++;
+            return true;
+        }
+
+        private static Pose StationWork(RobotGripper gripper, GrippableItem item, Transform station)
+        {
+            var point = item.GetGripPoint(gripper.Scara != null ? RobotWaypointSet.RobotType.Scara : RobotWaypointSet.RobotType.Fanuc);
+            var pointOffset = item.transform.InverseTransformPoint(point.position);
+            var pointRotation = Quaternion.Inverse(item.transform.rotation) * point.rotation;
+            var rotation = station.rotation * pointRotation * Quaternion.Inverse(Quaternion.Inverse(gripper.Tcp.rotation) * gripper.Contact.rotation);
+            var position = station.position + station.rotation * pointOffset - rotation * gripper.Tcp.InverseTransformPoint(gripper.Contact.position);
+            return new Pose(gripper.RobotFrame.InverseTransformPoint(position), Quaternion.Inverse(gripper.RobotFrame.rotation) * rotation);
         }
 
         public bool TryResume(out string error)
@@ -164,7 +274,7 @@ namespace LineWatch
             if (IsPickPlace)
             {
                 bool beforeGrip = GripCount == 0 && ReleaseCount == 0 && StepIndex >= 0 && StepIndex <= 1;
-                bool holding = GripCount == 1 && ReleaseCount == 0 && StepIndex >= 1 && StepIndex <= 3;
+                bool holding = GripCount == 1 && ReleaseCount == 0 && StepIndex >= 1 && StepIndex <= ReleaseStep;
                 if (!beforeGrip && !holding)
                 { error = "저장 단계와 집기/놓기 횟수가 복구 범위와 맞지 않습니다. 놓기 완료 후 복구는 별도 지원이 필요합니다."; return false; }
                 if (!CheckTransport(out error)) return false;
@@ -195,7 +305,9 @@ namespace LineWatch
             scenarioResets.Add(new ProgramRecord(this, reason));
             source = null; scaraOwner = null; fanucOwner = null;
             transportGripper = null; transportItem = null; cycleProductId = null; programName = null;
-            Array.Clear(targets, 0, targets.Length); ownedVersion = 0; scaraGeometry = default;
+            targets = new Pose[4]; ownedVersion = 0; scaraGeometry = default;
+            IsCellTransfer = false; transferLayout = null; transferDropSource = null; transferInput = null; transferDrop = null;
+            transferPickSource = null; transferCoordinator = null; transferTracker = null;
             State = RunState.Idle; StepIndex = 0; LastArrivedStepIndex = -1;
             LastArrivalPose = default; LastReleasePose = default; IsPickPlace = false;
             GripCount = 0; ReleaseCount = 0; LastError = null; ProgramRevision++;
@@ -236,7 +348,7 @@ namespace LineWatch
             LastArrivedStepIndex = StepIndex; LastArrivalPose = actual;
             if (IsPickPlace && !PerformAction(out error)) { Fault(error); return; }
             if (State != RunState.Running) return;
-            if (StepIndex == 3) { StepIndex = 4; State = RunState.Completed; return; }
+            if (StepIndex == StepCount - 1) { StepIndex = StepCount; State = RunState.Completed; return; }
             int next = StepIndex + 1;
             // Advance the logical step only after a fresh move request succeeds.
             if (!Dispatch(scaraOwner, fanucOwner, targets[next], next, out error)) { Fault(error); return; }
@@ -268,6 +380,21 @@ namespace LineWatch
         private bool SameProgram()
         {
             if (source == null || source != waypoints || scara != scaraOwner || fanuc != fanucOwner || !source.TryValidate(out _)) return false;
+            if (IsFanucTransfer)
+                return transferLayout != null && transferLayout.Fanuc == fanucOwner && transferLayout.HandoffPoint == transferInput &&
+                    (transferDestination == ProductDestination.A ? transferLayout.OutputA : transferLayout.OutputB) == transferDrop && transferLayout.FanucHandoffWaypoints == transferPickSource &&
+                    transferInput != null && transferDrop != null && transferPickSource != null && transferPickSource.Robot == RobotWaypointSet.RobotType.Fanuc && transferPickSource.TryValidate(out _) &&
+                    transferInput.position.Equals(transferInputPose.position) && transferInput.rotation.Equals(transferInputPose.rotation) &&
+                    transferDrop.position.Equals(transferDropPose.position) && transferDrop.rotation.Equals(transferDropPose.rotation) &&
+                    Same(targets[0], transferPickSource.Approach) && Same(targets[1], transferPickSource.Work) &&
+                    targets[6].position.Equals(targets[4].position + (transferPickSource.Retreat.PositionMetres - transferPickSource.Work.PositionMetres));
+            if (IsCellTransfer)
+                return transferLayout != null && transferLayout.Scara == scaraOwner && transferLayout.InputStop == transferInput &&
+                    transferLayout.HandoffPoint == transferDrop && transferLayout.ScaraHandoffWaypoints == transferDropSource &&
+                    transferInput != null && transferDrop != null && transferDropSource != null && transferDropSource.TryValidate(out _) &&
+                    transferInput.position.Equals(transferInputPose.position) && transferInput.rotation.Equals(transferInputPose.rotation) &&
+                    transferDrop.position.Equals(transferDropPose.position) && transferDrop.rotation.Equals(transferDropPose.rotation) &&
+                    Same(targets[3], transferDropSource.Approach) && Same(targets[4], transferDropSource.Work) && Same(targets[6], transferDropSource.Retreat);
             return Same(targets[0], source.Approach) && Same(targets[1], source.Work) && Same(targets[3], source.Retreat);
         }
         private static bool Same(Pose pose, RobotWaypointSet.Target target) => pose.position.Equals(target.PositionMetres) && pose.rotation.Equals(target.Rotation);
@@ -305,12 +432,32 @@ namespace LineWatch
                 error = "집기 전 물체/그리퍼의 보유자가 바뀌었습니다.";
             else if (GripCount > ReleaseCount && (transportGripper.HeldItem != transportItem || transportItem.Owner != transportGripper))
                 error = "운반 물체의 보유가 해제되거나 바뀌었습니다. 자동 재집기하지 않습니다.";
+            if (error == null && IsCellTransfer)
+            {
+                var tracker = transferLayout != null ? transferTracker : null;
+                if (tracker == null || transportItem.ProductTracker != tracker || transportItem.ProductId != cycleProductId ||
+                    !tracker.TryGetItem(cycleProductId, out var original) || original != transportItem || !tracker.TryGet(cycleProductId, out var record))
+                    error = "저장한 등록 상품과 원래 실물 연결이 다릅니다.";
+                else
+                {
+                    var expected = IsFanucTransfer
+                        ? GripCount == 0 ? ProductLocation.Handoff : ReleaseCount == 0 ? ProductLocation.Fanuc : transferDestination == ProductDestination.A ? ProductLocation.OutputA : ProductLocation.OutputB
+                        : GripCount == 0 ? ProductLocation.Input : ReleaseCount == 0 ? ProductLocation.Scara : ProductLocation.Handoff;
+                    bool occupied = IsFanucTransfer ? GripCount > 0 && tracker.HandoffProductId != null : ReleaseCount == 0 && tracker.HandoffProductId != null;
+                    if (record.Location != expected || occupied || IsFanucTransfer && record.Destination != transferDestination ||
+                        ReleaseCount > 0 && (transportItem.Owner != null || transportGripper.HeldItem != null))
+                        error = "상품의 운반 단계 또는 인계대 점유/실제 보유가 맞지 않습니다.";
+                    else if (!tracker.TryCheckPhysicalState(out error)) return false;
+                    else if (IsFanucTransfer && (transferCoordinator == null || !transferCoordinator.TryCheckScaraRetreat(out error)))
+                    { if (error == null) error = "원래 셀 운전 관리자 연결을 확인하세요."; return false; }
+                }
+            }
             return error == null;
         }
 
         internal bool AllowsGripperAction(RobotGripper gripper, bool releasing) => IsPickPlace && State == RunState.Acting &&
             gripper == transportGripper && Version == ownedVersion &&
-            (releasing ? StepIndex == 3 && GripCount == 1 && ReleaseCount == 0 : StepIndex == 1 && GripCount == 0);
+            (releasing ? StepIndex == ReleaseStep && GripCount == 1 && ReleaseCount == 0 : StepIndex == 1 && GripCount == 0);
 
         private bool PerformAction(out string error)
         {
@@ -322,7 +469,7 @@ namespace LineWatch
                 GripCount++;
                 if (State == RunState.Acting) State = RunState.Running;
             }
-            if (StepIndex == 3 && ReleaseCount == 0)
+            if (StepIndex == ReleaseStep && ReleaseCount == 0)
             {
                 State = RunState.Acting;
                 if (!transportGripper.TryReleaseFromSequence(this, out error)) return false;
@@ -389,7 +536,7 @@ namespace LineWatch
                     J(s.Axis1.MaximumDegrees, s.Axis2.MaximumDegrees, s.Axis3.MaximumMetres, s.Axis4.MaximumDegrees));
                 var speeds = new Vector4(s.Axis1.SpeedDegreesPerSecond, s.Axis2.SpeedDegreesPerSecond, s.Axis3.SpeedMetresPerSecond, s.Axis4.SpeedDegreesPerSecond);
                 var current = J(s.Axis1.CurrentPosition, s.Axis2.CurrentPosition, s.Axis3.CurrentPosition, s.Axis4.CurrentPosition);
-                for (int i = first; i < 4; i++)
+                for (int i = first; i < program.Length; i++)
                 {
                     var goal = program[i]; float yaw = Yaw(goal.rotation);
                     var result = SIK.Solve(goal.position, yaw, s.Geometry, limits);
@@ -401,10 +548,10 @@ namespace LineWatch
                             Math.Pow(q.Q2Degrees - current.Q2Degrees, 2) + Math.Pow(q.Q4Degrees - current.Q4Degrees, 2);
                         if (cost < best) { found = true; best = cost; end = candidate; }
                     }
-                    if (!result.Success || !found) { error = $"{i + 1}/4 경유점 IK 사전 검사 실패: {result.Failure}"; return false; }
+                    if (!result.Success || !found) { error = $"{i + 1}/{program.Length} 경유점 IK 사전 검사 실패: {result.Failure}"; return false; }
                     bool ok = i == 0 ? ScaraMotionPlanner.Joint(current, end, limits, speeds, out var plan, out var failure)
                         : ScaraMotionPlanner.Linear(current, goal.position, yaw, s.Geometry, limits, speeds, 1, out plan, out failure);
-                    if (!ok) { error = $"{i + 1}/4 경유점 경로 사전 검사 실패: {failure}"; return false; }
+                    if (!ok) { error = $"{i + 1}/{program.Length} 경유점 경로 사전 검사 실패: {failure}"; return false; }
                     current = plan.End.Joints;
                 }
             }
@@ -419,11 +566,11 @@ namespace LineWatch
                     { error = "FANUC의 양의 유한 속도를 확인하세요."; return false; }
                     current[i] = axis.CurrentPosition; lower[i] = axis.MinimumDegrees; upper[i] = axis.MaximumDegrees;
                 }
-                for (int i = first; i < 4; i++)
+                for (int i = first; i < program.Length; i++)
                 {
                     var seeds = new List<float[]> { current, new float[6], new[] { 10f, -15f, 25f, 15f, 20f, -10f }, new[] { -10f, 15f, -25f, -15f, -20f, 10f } };
                     var result = i == first ? preview.Result : FIK.Solve(program[i].position, program[i].rotation, f.Geometry, lower, upper, seeds);
-                    if (!result.Succeeded) { error = $"{i + 1}/4 경유점 IK 사전 검사 실패: {result.Reason}"; return false; }
+                    if (!result.Succeeded) { error = $"{i + 1}/{program.Length} 경유점 IK 사전 검사 실패: {result.Reason}"; return false; }
                     current = new float[6]; for (int j = 0; j < 6; j++) current[j] = result.JointDegrees[j];
                 }
             }

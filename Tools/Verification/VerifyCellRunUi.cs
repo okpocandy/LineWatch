@@ -37,7 +37,9 @@ public static class VerifyCellRunUi
             var bounds = w.rootVisualElement.worldBound;
             foreach (var name in CommandNames)
             {
-                var b = w.rootVisualElement.Q<Button>(name); var r = b.worldBound;
+                var b = w.rootVisualElement.Q<Button>(name);
+                if (b.GetFirstAncestorOfType<Foldout>() != null) continue; // Folded individual tools have no visible bounds.
+                var r = b.worldBound;
                 Require(r.width >= 95 && r.height >= 25 && !float.IsNaN(r.x) && r.xMin >= bounds.xMin - 1 && r.xMax <= bounds.xMax + 1,
                     "Common button clips horizontally: " + name); geometry++;
             }

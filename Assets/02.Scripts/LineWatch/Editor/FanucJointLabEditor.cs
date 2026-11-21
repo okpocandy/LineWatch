@@ -9,7 +9,7 @@ namespace LineWatch.Editor
     [CustomEditor(typeof(FanucJointLab))]
     public sealed class FanucJointLabEditor : UnityEditor.Editor
     {
-        [MenuItem("LineWatch/FANUC 조작 테스트")]
+        [MenuItem("LineWatch/개별 시험(고급)/FANUC 조작")]
         private static void OpenLab()
         {
             var window = EditorWindow.GetWindow<FanucJointLabWindow>("FANUC 조작 테스트");

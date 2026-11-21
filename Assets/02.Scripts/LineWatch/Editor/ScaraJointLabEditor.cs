@@ -9,7 +9,7 @@ namespace LineWatch.Editor
     [CustomEditor(typeof(ScaraJointLab))]
     public sealed class ScaraJointLabEditor : UnityEditor.Editor
     {
-        [MenuItem("LineWatch/SCARA 4축 조작 테스트")]
+        [MenuItem("LineWatch/개별 시험(고급)/SCARA 4축 조작")]
         private static void OpenLab()
         {
             var window = EditorWindow.GetWindow<ScaraJointLabWindow>("SCARA 4축 조작 테스트");

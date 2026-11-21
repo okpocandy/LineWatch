@@ -106,6 +106,43 @@ namespace LineWatch
         {
             record = null;
             if (!cellGate.CanIssue(null, out error)) return false;
+            return FeedNext(out record, out error);
+        }
+
+        internal bool TryFeedNextFromCell(CellRunController owner, out ProductRecord record, out string error)
+        {
+            record = null;
+            if (!cellGate.IsManagedBy(owner) || !owner.AllowsAutomaticInputPreparation(this))
+            { error = "연속 운전의 검증된 투입 단계에서만 자동 투입할 수 있습니다."; return false; }
+            return FeedNext(out record, out error);
+        }
+
+        internal bool IsNextWaitingAligned()
+        {
+            var waiting = flow.WaitingSnapshot();
+            return flow.InputProductId == null && waiting.Count > 0 && layout != null && layout.InputStop != null &&
+                TryGetItem(waiting[0], out var item) && item.IsReady && item.Owner == null && At(item, layout.InputStop);
+        }
+
+        internal bool TrySupplyNextFromCell(CellRunController owner, float seconds, out string error)
+        {
+            if (!cellGate.IsManagedBy(owner) || !owner.AllowsAutomaticInputPreparation(this))
+            { error = "연속 운전의 투입 정렬 대기에서만 실물을 공급할 수 있습니다."; return false; }
+            if (!Ready(out error)) return false;
+            var waiting = flow.WaitingSnapshot();
+            if (flow.InputProductId != null || waiting.Count == 0 || waiting[0] != owner.AutomaticProductId ||
+                !flow.TryGet(waiting[0], out var record) || record.Destination != owner.AutomaticDestination ||
+                !TryGetItem(waiting[0], out var item) || !item.IsReady || item.Owner != null)
+            { error = "공급할 선두 상품·원래 실물·목적지·미보유 상태를 확인하세요."; return false; }
+            // Kinematic supply prototype: 0.2 m/s and 90 degrees/s, advanced only by FixedUpdate.
+            item.Body.MovePosition(Vector3.MoveTowards(item.Body.position, layout.InputStop.position, .2f * seconds));
+            item.Body.MoveRotation(Quaternion.RotateTowards(item.Body.rotation, layout.InputStop.rotation, 90f * seconds));
+            return true;
+        }
+
+        private bool FeedNext(out ProductRecord record, out string error)
+        {
+            record = null;
             if (!Ready(out error)) return false;
             if (flow.InputProductId != null) { error = "투입 지점 사용 중: 대기열을 유지합니다."; return false; }
             var waiting = flow.WaitingSnapshot();

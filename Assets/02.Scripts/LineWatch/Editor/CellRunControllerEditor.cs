@@ -45,15 +45,48 @@ namespace LineWatch.Editor
             root.Q<ObjectField>().SetEnabled(false);
             var state = new Label { name = "cell-run-state" };
             var owner = new Label { name = "cell-run-owner" };
+            var automaticState = new Label { name = "cell-run-automatic-transfer" };
             var scaraState = new Label { name = "cell-run-scara" };
             var fanucState = new Label { name = "cell-run-fanuc" };
             var products = new Label { name = "cell-run-products" };
-            foreach (var label in new[] { state, owner, scaraState, fanucState, products })
+            foreach (var label in new[] { state, owner, automaticState, scaraState, fanucState, products })
             { label.style.whiteSpace = WhiteSpace.Normal; label.style.marginTop = 6; root.Add(label); }
             var mode = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-run-mode" }; root.Add(mode);
             var fault = new HelpBox("", HelpBoxMessageType.Warning) { name = "cell-run-fault" }; root.Add(fault);
             var commands = new Dictionary<CellRunCommand, Button>();
             string requestMessage = null; bool requestAccepted = false;
+            ProductRecord transferPreview = null;
+            var prepareAutomaticTransfer = new Button(() =>
+            {
+                if (cell == null) { requestAccepted = false; requestMessage = "셀 운전 관리자가 없습니다."; return; }
+                requestAccepted = cell.TryPrepareAutomaticTransfer(transferPreview, out var error);
+                requestMessage = requestAccepted ? "자동 단품 준비 완료 · 공통 시작으로 두 로봇을 순서대로 운전하세요." : error;
+            }) { name = "cell-run-prepare-automatic-transfer", text = "단품 운전 준비" };
+            var prepareContinuousTransfer = new Button(() =>
+            {
+                if (cell == null) { requestAccepted = false; requestMessage = "셀 운전 관리자가 없습니다."; return; }
+                requestAccepted = cell.TryPrepareContinuousTransfer(transferPreview, out var error);
+                requestMessage = requestAccepted ? "연속 운전 준비 완료 · 공통 시작으로 등록된 대기 상품까지 운전하세요." : error;
+            }) { name = "cell-run-prepare-continuous-transfer", text = "연속 운전 준비" };
+            ProductRecord fanucTransferPreview = null;
+            var fanucTransferTarget = new Label { name = "cell-run-fanuc-transfer-target" };
+            fanucTransferTarget.style.whiteSpace = WhiteSpace.Normal;
+            var prepareFanucTransfer = new Button(() =>
+            {
+                if (cell == null) { requestAccepted = false; requestMessage = "셀 운전 관리자가 없습니다."; return; }
+                var preview = fanucTransferPreview;
+                if (preview == null) { requestAccepted = false; requestMessage = "표시된 인계 상품이 없습니다."; return; }
+                requestAccepted = cell.TryPrepareFanucTransfer(preview.Destination, preview, out var error);
+                requestMessage = requestAccepted ? "FANUC 운반 준비 완료 · 공통 시작을 눌러 운전하세요." : error;
+            }) { name = "cell-run-prepare-fanuc-transfer", text = "FANUC 인계 상품 운반 준비" };
+            var transferTarget = new Label { name = "cell-run-transfer-target" };
+            transferTarget.style.whiteSpace = WhiteSpace.Normal;
+            var prepareTransfer = new Button(() =>
+            {
+                if (cell == null) { requestAccepted = false; requestMessage = "셀 운전 관리자가 없습니다."; return; }
+                requestAccepted = cell.TryPrepareScaraTransfer(transferPreview, out var error);
+                requestMessage = requestAccepted ? "SCARA 운반 준비 완료 · 공통 시작을 눌러 운전하세요." : error;
+            }) { name = "cell-run-prepare-scara-transfer", text = "SCARA 투입 상품 운반 준비" };
             Button Command(CellRunCommand command, string name, string text)
             {
                 var b = new Button(() =>
@@ -83,27 +116,35 @@ namespace LineWatch.Editor
                 if (cell == null) { requestAccepted = false; requestMessage = "셀 운전 관리자가 없습니다."; return; }
                 requestAccepted = cell.TryReleaseControl(out var error);
                 requestMessage = requestAccepted ? "권한 반환 수락 · 저장 경로와 보유는 유지됩니다." : error;
-            }) { name = "cell-run-return", text = "개별 조작으로 권한 반환" };
-            void Row(params Button[] buttons)
+            }) { name = "cell-run-return", text = "권한 반환 · 새 준비" };
+            void Row(VisualElement parent, params Button[] buttons)
             {
                 var row = new VisualElement(); row.style.flexDirection = FlexDirection.Row; row.style.flexWrap = Wrap.Wrap;
                 foreach (var b in buttons)
                 { b.style.flexGrow = 1; b.style.flexBasis = 0; b.style.minWidth = 100; b.style.minHeight = 28; b.style.marginTop = 5; row.Add(b); }
-                root.Add(row);
+                parent.Add(row);
             }
-            Row(takeScara, takeFanuc); Row(start, pause, resume); Row(stop, reset); Row(release);
+            root.Add(transferTarget); Row(root, prepareAutomaticTransfer, prepareContinuousTransfer);
+            root.Add(new HelpBox("단품: 투입 1개. 연속: 투입 상품과 등록된 대기열. 준비 후 시작을 누르면 공급·운반하고 대기열이 비면 정지합니다. 대기 상품이 없으면 연속도 1개만 운반합니다.", HelpBoxMessageType.Info));
+            Row(root, start, pause, resume); Row(root, stop, reset); Row(root, release);
             var request = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-run-request" }; root.Add(request);
-            root.Add(new HelpBox("개별 자동/순차 운전을 정지한 뒤 경로를 인계하세요. 공통 정지는 권한과 보유를 유지합니다. 개별 조작 복귀는 정지 후 권한 반환으로 구분합니다. 활성 버튼도 실행 직전 경로·정렬 검사에서 거부될 수 있습니다.", HelpBoxMessageType.Info));
-            root.Add(new HelpBox("고장 해제는 실물·ID·보유/위치가 확인되는 셀/추적 고장과 셀이 인계받은 경로 고장을 명시 해제합니다. 미인계 고장 경로 하나는 먼저 복구 대상으로 인계하세요. 자동 집기 경로는 집기 전 또는 같은 실물 보유 중의 단계/행동 횟수를 확인합니다. 경로/FK 검사 후 셀 Stopped·경로 Paused에서 대기하며 상품·통계·보유·단계·인계 권한을 유지합니다. 원본 삭제 상품의 손실 확정은 아래 별도 영역에서 요청하며 고장 해제와 구분합니다. 실물이 남은 미보유 상품은 사유를 남겨 대기로 복귀할 수 있습니다. 재개하지 않을 경로는 아래 명시 종료를 사용하세요. 시나리오 초기화는 모든 상품 종료와 별도 고장 해제 후에만 가능합니다.", HelpBoxMessageType.Info));
-            root.Add(CreateLossControls(cell));
-            root.Add(CreateCancellationControls(cell, scara, fanuc));
-            root.Add(CreateQueueRecoveryControls(cell));
-            root.Add(CreateScenarioControls(cell));
+            var individual = new Foldout { name = "cell-run-individual-tests", text = "개별 경로 시험 · 고급", value = false };
+            individual.Add(root.Q<ObjectField>("cell-run-controller")); individual.Add(owner);
+            individual.Add(new HelpBox("개별 로봇의 운반/저장 경로만 시험할 때 사용합니다. 자동 단품 운전에는 필요하지 않습니다.", HelpBoxMessageType.Info));
+            Row(individual, prepareTransfer); individual.Add(fanucTransferTarget); Row(individual, prepareFanucTransfer);
+            Row(individual, takeScara, takeFanuc); root.Add(individual);
+            var recovery = new Foldout { name = "cell-run-recovery-tools", text = "복구·초기화 · 고급", value = false };
+            recovery.Add(new HelpBox("실물/ID/보유 확인 후 별도 고장 해제를 요청하세요. 손실 확정·대기 복귀·경로 종료·시나리오 초기화는 아래에서 명시적으로 조작합니다. 초기화에는 모든 상품 종료가 필요합니다.", HelpBoxMessageType.Info));
+            recovery.Add(CreateLossControls(cell)); recovery.Add(CreateCancellationControls(cell, scara, fanuc));
+            recovery.Add(CreateQueueRecoveryControls(cell)); recovery.Add(CreateScenarioControls(cell)); root.Add(recovery);
             void Refresh()
             {
                 if (cell == null)
                 {
-                    foreach (var b in commands.Values.Concat(new[] { takeScara, takeFanuc, release })) b.SetEnabled(false);
+                    foreach (var b in commands.Values.Concat(new[] { prepareAutomaticTransfer, prepareContinuousTransfer, prepareTransfer, prepareFanucTransfer, takeScara, takeFanuc, release })) b.SetEnabled(false);
+                    transferPreview = null; transferTarget.text = "투입 상품 확인 불가";
+                    automaticState.text = "자동 단품: 관리자 없음 · 상태 확인 불가";
+                    fanucTransferPreview = null; fanucTransferTarget.text = "인계 상품 확인 불가";
                     state.text = "셀 상태: 관리자 없음 · 조작 차단"; owner.text = "명령 권한: 확인 불가";
                     scaraState.text = "SCARA: 관리자 없음 · 상태 확인 불가"; fanucState.text = "FANUC: 관리자 없음 · 상태 확인 불가";
                     products.text = "상품 추적: 별도 관리자와 실제 보유를 확인하세요.";
@@ -113,6 +154,12 @@ namespace LineWatch.Editor
                 }
                 bool playing = Application.isPlaying;
                 state.text = playing ? "셀 상태: " + cell.State : "셀 상태: Play 대기";
+                string automaticPhase = cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.Scara ? "SCARA 운반/퇴피"
+                    : cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.Fanuc ? "FANUC 배출"
+                    : cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.WaitingForInput ? "투입 공급/정렬" : "완료";
+                automaticState.text = !playing ? "자동 단품: Play 대기"
+                    : cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.None ? "자동 단품: 미준비"
+                    : (cell.IsAutomaticContinuous ? "연속 운전: " : "자동 단품: ") + cell.AutomaticProductId + " · 목적지 " + cell.AutomaticDestination + " · " + automaticPhase;
                 owner.text = "명령 권한: " + (!playing ? "Play 대기" : !cell.HasControlledSequence ? "개별 시험"
                     : cell.ControlledSequence == null ? "공통 제어 · 경로 연결 없음"
                     : cell.ControlledSequence == scara ? layout.ScaraId + " 경로 · 공통 제어"
@@ -120,6 +167,29 @@ namespace LineWatch.Editor
                 scaraState.text = RobotText(layout != null ? layout.ScaraId : "SCARA", scara);
                 fanucState.text = RobotText(layout != null ? layout.FanucId : "FANUC", fanuc);
                 var tracker = cell.GetComponent<CellProductTracker>();
+                transferPreview = null;
+                if (playing && tracker != null) tracker.TryGet(tracker.InputProductId, out transferPreview);
+                transferTarget.text = !playing ? "운전 준비 · Play 대기"
+                    : transferPreview == null ? "현재 투입 상품 없음"
+                    : "투입 상품: " + transferPreview.Id + " · 목적지 " + transferPreview.Destination;
+                bool prepareAllowed = cell.CanPrepareScaraTransfer(out var prepareReason);
+                prepareTransfer.SetEnabled(prepareAllowed); prepareTransfer.tooltip = prepareAllowed
+                    ? "표시된 상품 기록·전체 경로를 실행 직전 다시 확인합니다. 준비 후 별도 시작이 필요합니다." : prepareReason;
+                bool automaticAllowed = cell.CanPrepareAutomaticTransfer(out var automaticReason);
+                prepareAutomaticTransfer.SetEnabled(automaticAllowed); prepareAutomaticTransfer.tooltip = automaticAllowed
+                    ? "표시된 한 상품만 준비합니다. 준비 후 별도 공통 시작이 필요합니다." : automaticReason;
+                bool continuousAllowed = cell.CanPrepareContinuousTransfer(out var continuousReason);
+                prepareContinuousTransfer.SetEnabled(continuousAllowed); prepareContinuousTransfer.tooltip = continuousAllowed
+                    ? "표시된 투입 상품부터 등록된 FIFO를 운전합니다. 준비 후 별도 시작이 필요합니다." : continuousReason;
+                fanucTransferPreview = null;
+                if (playing && tracker != null) tracker.TryGet(tracker.HandoffProductId, out fanucTransferPreview);
+                fanucTransferTarget.text = !playing ? "FANUC 상품 운반 · Play 대기"
+                    : fanucTransferPreview == null ? "인계 상품 없음 · SCARA 운반과 퇴피를 먼저 완료하세요."
+                    : "인계 상품: " + fanucTransferPreview.Id + " · 목적지 " + fanucTransferPreview.Destination + " → " + fanucTransferPreview.Destination + " 출구";
+                string fanucPrepareReason = "인계 상품이 필요합니다.";
+                bool fanucPrepareAllowed = fanucTransferPreview != null && cell.CanPrepareFanucTransfer(fanucTransferPreview.Destination, out fanucPrepareReason);
+                prepareFanucTransfer.SetEnabled(fanucPrepareAllowed); prepareFanucTransfer.tooltip = fanucPrepareAllowed
+                    ? "표시된 상품 기록·목적지·전체 경로를 다시 확인합니다. 준비 후 별도 시작이 필요합니다." : fanucPrepareReason;
                 products.text = tracker == null ? "상품 추적: 연결 없음" : $"상품 등록 기록: {tracker.Count} · 대기 {tracker.WaitingSnapshot().Count}\n투입 {tracker.InputProductId ?? "-"} / SCARA {tracker.ScaraProductId ?? "-"} / 인계 {tracker.HandoffProductId ?? "-"} / FANUC {tracker.FanucProductId ?? "-"}";
                 if (tracker != null && tracker.IsFaulted) products.text += "\n추적 고장 유지: " + tracker.FaultReason;
                 else if (tracker != null && !string.IsNullOrEmpty(tracker.LastAcknowledgedFaultReason)) products.text += "\n최근 추적 명시 해제: " + tracker.LastAcknowledgedFaultReason;
@@ -143,12 +213,12 @@ namespace LineWatch.Editor
                 takeScara.text = cell.IsFaulted ? "SCARA 고장 복구 인계" : "SCARA 경로 인계";
                 takeFanuc.text = cell.IsFaulted ? "FANUC 고장 복구 인계" : "FANUC 경로 인계";
                 release.SetEnabled(cell.CanReleaseControl(out var releaseReason)); release.tooltip = releaseReason;
-                mode.text = !playing ? "Play 실행 후 셀과 개별 경로를 조작할 수 있습니다."
-                    : cell.IsFaulted ? cell.HasControlledSequence ? "복구 경로 인계 유지: 고장 해제 후 별도 공통 시작으로 이어갑니다."
-                        : "고장 경로 하나를 복구 대상으로 인계하세요. 인계 후에도 고장은 유지되며 별도 해제/시작이 필요합니다."
-                    : !cell.HasControlledSequence ? "인계 없음: 공통 시작은 운전 허가만 바꿉니다. 로봇은 자동 출발하지 않습니다."
-                    : cell.ControlledSequence != null && cell.ControlledSequence.State == RobotWaypointSequence.RunState.Completed ? "인계 경로 완료: 시작/재개로 반복하지 않습니다. 다음 개별 시험은 정지 후 권한을 반환하세요."
-                    : "인계된 저장 경로 하나를 공통 시작/재개로 이어갑니다.";
+                mode.text = !playing ? "Play 후 단품 또는 연속 준비 → 시작 순서로 운전하세요."
+                    : cell.IsFaulted ? "고장을 확인한 뒤 별도 해제하세요. 상세 조작은 복구·초기화(고급)에 있습니다."
+                    : cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.Completed ? "운전 완료 · 권한 반환 후 새 상품을 준비하세요."
+                    : cell.AutomaticPhase != CellRunController.AutomaticTransferPhase.None ? "공통 조작으로 운전·일시정지·재개·정지합니다."
+                    : !cell.HasControlledSequence ? "단품 또는 연속 준비 후 시작하세요. 개별 시험은 고급 영역에 있습니다."
+                    : "개별 경로 인계 상태 · 공통 시작/재개로 이어갑니다.";
                 fault.text = cell.IsFaulted ? "고장 유지: " + cell.FaultReason
                     : string.IsNullOrEmpty(cell.LastAcknowledgedFaultReason) ? "" : "최근 명시 해제: " + cell.LastAcknowledgedFaultReason;
                 fault.messageType = cell.IsFaulted ? HelpBoxMessageType.Warning : HelpBoxMessageType.Info;
@@ -401,7 +471,7 @@ namespace LineWatch.Editor
             string held = item == null ? "없음" : item.Owner != gripper ? "보유 불일치" : item.ProductId ?? item.name;
             string step = sequence.State == RobotWaypointSequence.RunState.Idle ? "대기"
                 : sequence.State == RobotWaypointSequence.RunState.Completed ? "완료"
-                : sequence.State == RobotWaypointSequence.RunState.Cancelled ? "명시 종료 · 재개 불가" : $"{sequence.StepIndex + 1}/4 {sequence.StepName}";
+                : sequence.State == RobotWaypointSequence.RunState.Cancelled ? "명시 종료 · 재개 불가" : $"{sequence.StepIndex + 1}/{sequence.StepCount} {sequence.StepName}";
             string reason = sequence.State == RobotWaypointSequence.RunState.Faulted ? "\n경로 고장 유지: " + sequence.LastError
                 : string.IsNullOrEmpty(sequence.LastAcknowledgedFaultReason) ? "" : "\n최근 경로 명시 해제: " + sequence.LastAcknowledgedFaultReason;
             var cancellations = sequence.CancellationSnapshot();

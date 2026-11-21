@@ -8,21 +8,6 @@ namespace LineWatch.Editor
     [CustomEditor(typeof(MachineControlLab))]
     public sealed class MachineControlLabEditor : UnityEditor.Editor
     {
-        [MenuItem("LineWatch/조작 테스트")]
-        private static void SelectLab()
-        {
-            var lab = Object.FindFirstObjectByType<MachineControlLab>();
-            if (lab == null)
-            {
-                EditorUtility.DisplayDialog("LineWatch 조작 테스트", "RobotLab 씬을 열어주세요.", "확인");
-                return;
-            }
-
-            Selection.activeGameObject = lab.gameObject;
-            EditorGUIUtility.PingObject(lab.gameObject);
-            EditorUtility.OpenPropertyEditor(lab);
-        }
-
         public override VisualElement CreateInspectorGUI()
         {
             var lab = (MachineControlLab)target;

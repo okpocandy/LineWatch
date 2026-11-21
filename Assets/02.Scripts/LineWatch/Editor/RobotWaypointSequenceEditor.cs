@@ -45,7 +45,9 @@ namespace LineWatch.Editor
                 data.SetValueWithoutNotify(sequence.Waypoints);
                 bool playing = EditorApplication.isPlaying, clock = !EditorApplication.isPaused && Time.timeScale > 0f;
                 bool running = sequence.IsBusy;
-                route.text = sequence.IsPickPlace ? "접근 → 작업/집기 → 상승 → 퇴피/놓기" : "접근 → 작업 → 상승 → 퇴피 · 집기 동작 없음";
+                route.text = sequence.IsFanucTransfer ? $"인계 접근 → 집기 → 상승 → {sequence.FanucDestination} 출구 접근 → 놓기 → 상승 → 퇴피"
+                    : sequence.IsCellTransfer ? "투입 접근 → 집기 → 상승 → 인계 접근 → 놓기 → 상승 → 퇴피"
+                    : sequence.IsPickPlace ? "접근 → 작업/집기 → 상승 → 퇴피/놓기" : "접근 → 작업 → 상승 → 퇴피 · 집기 동작 없음";
                 bool paused = sequence.State == RobotWaypointSequence.RunState.Paused || sequence.State == RobotWaypointSequence.RunState.Faulted;
                 bool manual = CellRunControllerEditor.ManualAllowed(sequence, out var lockReason);
                 var gripper = sequence.GetComponent<RobotGripper>();
@@ -56,12 +58,12 @@ namespace LineWatch.Editor
                 cellLock.text = lockReason ?? "";
                 cellLock.style.display = playing && !manual ? DisplayStyle.Flex : DisplayStyle.None;
                 string status = !playing ? "Play 대기" : sequence.State == RobotWaypointSequence.RunState.Idle ? "대기"
-                    : sequence.State == RobotWaypointSequence.RunState.Completed ? "4/4 완료"
+                    : sequence.State == RobotWaypointSequence.RunState.Completed ? sequence.StepCount + "/" + sequence.StepCount + " 완료"
                     : sequence.State == RobotWaypointSequence.RunState.Cancelled ? "명시 종료 · 재개 불가"
                     : sequence.IsBusy ? clock ? "실행 중" : "에디터/시간 일시정지"
                     : sequence.State == RobotWaypointSequence.RunState.Paused ? "정지" : "오류 중단";
                 state.text = !playing || sequence.State == RobotWaypointSequence.RunState.Idle || sequence.State == RobotWaypointSequence.RunState.Completed
-                    ? status : $"{status} · {sequence.StepIndex + 1}/4 {sequence.StepName}";
+                    ? status : $"{status} · {sequence.StepIndex + 1}/{sequence.StepCount} {sequence.StepName}";
                 error.text = string.IsNullOrEmpty(sequence.LastError) ? requestError ?? "" : sequence.LastError +
                     (string.IsNullOrEmpty(requestError) ? "" : "\n마지막 요청 거부: " + requestError);
                 error.style.display = string.IsNullOrEmpty(error.text) ? DisplayStyle.None : DisplayStyle.Flex;

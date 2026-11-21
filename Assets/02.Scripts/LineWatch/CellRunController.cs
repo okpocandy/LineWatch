@@ -2,13 +2,14 @@ using UnityEngine;
 
 namespace LineWatch
 {
-    // Owns command permission for one explicitly adopted, already-paused robot program.
-    // Product dispatch and the two-robot picking cycle remain separate from this controller.
+    // Owns command permission and can connect two prepared robot programs for one product.
+    // Product state and physical ownership remain with the tracker and grippers.
     [DefaultExecutionOrder(300)]
     [DisallowMultipleComponent]
     [RequireComponent(typeof(LineWatchCellLayout))]
     public sealed class CellRunController : MonoBehaviour
     {
+        public enum AutomaticTransferPhase { None, Scara, Fanuc, Completed, WaitingForInput }
         private readonly CellRunStateMachine policy = new CellRunStateMachine();
         private LineWatchCellLayout layout;
         private CellProductTracker tracker;
@@ -19,6 +20,14 @@ namespace LineWatch
         private RobotWaypointSequence controlledSequence;
         private bool hasControlledSequence;
         private bool resumeDispatchInProgress;
+        private bool automaticHandoffPreparation;
+        private bool automaticInputPreparation;
+        private ProductDestination automaticDestination;
+
+        public AutomaticTransferPhase AutomaticPhase { get; private set; }
+        public string AutomaticProductId { get; private set; }
+        public bool IsAutomaticContinuous { get; private set; }
+        public ProductDestination? AutomaticDestination => AutomaticPhase == AutomaticTransferPhase.None ? (ProductDestination?)null : automaticDestination;
 
         public CellRunState State => policy.State;
         public string FaultReason => policy.FaultReason;
@@ -65,22 +74,20 @@ namespace LineWatch
             }
             if (!policy.TryExecute(command, out error)) return false;
             if (command == CellRunCommand.Pause) StopBoth();
-            if (resumePath)
-            {
-                // The gate re-reads cell health during this synchronous dispatch. Do not
-                // mistake the still-paused robot for an external stop before it commits.
-                resumeDispatchInProgress = true;
-                try
-                {
-                    if (!controlledSequence.TryResumeFromCell(this, out error))
-                    {
-                        Fault(error);
-                        return false;
-                    }
-                }
-                finally { resumeDispatchInProgress = false; }
-            }
+            if (resumePath) return ResumeControlledPath(out error);
             return true;
+        }
+
+        private bool ResumeControlledPath(out string error)
+        {
+            // Admission re-reads cell health while the prepared path is still paused.
+            resumeDispatchInProgress = true;
+            try
+            {
+                if (controlledSequence.TryResumeFromCell(this, out error)) return true;
+                Fault(error); return false;
+            }
+            finally { resumeDispatchInProgress = false; }
         }
 
         public bool TryTakeControl(RobotWaypointSequence sequence, out string error)
@@ -98,11 +105,133 @@ namespace LineWatch
             return true;
         }
 
+        public bool CanPrepareScaraTransfer(out string error)
+        {
+            if (!CanReadReady(out error) || !ClockReady(out error)) return false;
+            if (State != CellRunState.Stopped || !AtRest || hasControlledSequence ||
+                HasPendingSequence(scaraSequence) || HasPendingSequence(fanucSequence))
+            { error = "두 로봇을 정지하고 기존 인계/미완료 경로를 정리한 뒤 SCARA 상품 운반을 준비하세요."; return false; }
+            if (!ReferenceEquals(scaraGripper.HeldItem, null) || !ReferenceEquals(fanucGripper.HeldItem, null))
+            { error = "두 집게가 비어 있어야 합니다. 준비로 기존 보유를 변경하지 않습니다."; return false; }
+            if (tracker.InputProductId == null || !tracker.TryGetItem(tracker.InputProductId, out _) || tracker.HandoffProductId != null)
+            { error = "투입 상품 하나와 빈 인계대가 필요합니다."; return false; }
+            return tracker.TryCheckPhysicalState(out error);
+        }
+
+        public bool TryPrepareScaraTransfer(out string error)
+        {
+            if (!CanPrepareScaraTransfer(out error)) return false;
+            tracker.TryGet(tracker.InputProductId, out var current);
+            return TryPrepareScaraTransfer(current, out error);
+        }
+
+        public bool CanPrepareAutomaticTransfer(out string error) => CanPrepareScaraTransfer(out error);
+
+        public bool TryPrepareAutomaticTransfer(out string error)
+        {
+            if (!CanPrepareAutomaticTransfer(out error)) return false;
+            tracker.TryGet(tracker.InputProductId, out var current);
+            return TryPrepareAutomaticTransfer(current, out error);
+        }
+
+        public bool TryPrepareAutomaticTransfer(ProductRecord expected, out string error)
+        {
+            if (!TryPrepareScaraTransfer(expected, out error)) return false;
+            IsAutomaticContinuous = false;
+            AutomaticProductId = expected.Id; automaticDestination = expected.Destination;
+            AutomaticPhase = AutomaticTransferPhase.Scara;
+            return true;
+        }
+
+        public bool CanPrepareContinuousTransfer(out string error) => CanPrepareAutomaticTransfer(out error);
+
+        public bool TryPrepareContinuousTransfer(out string error)
+        {
+            if (!CanPrepareContinuousTransfer(out error)) return false;
+            tracker.TryGet(tracker.InputProductId, out var current);
+            return TryPrepareContinuousTransfer(current, out error);
+        }
+
+        public bool TryPrepareContinuousTransfer(ProductRecord expected, out string error)
+        {
+            if (!TryPrepareAutomaticTransfer(expected, out error)) return false;
+            IsAutomaticContinuous = true;
+            return true;
+        }
+
+        public bool TryPrepareScaraTransfer(ProductRecord expected, out string error)
+        {
+            if (!CanPrepareScaraTransfer(out error)) return false;
+            if (expected == null || expected.Id != tracker.InputProductId || !tracker.TryGet(expected.Id, out var current) || !ReferenceEquals(expected, current))
+            { error = "표시 후 투입 상품 기록이 바뀌었습니다. 현재 상품을 확인한 뒤 다시 준비하세요."; return false; }
+            tracker.TryGetItem(tracker.InputProductId, out var item);
+            if (!scaraSequence.TryPrepareScaraTransfer(this, layout, scaraGripper, item, out error)) return false;
+            controlledSequence = scaraSequence; hasControlledSequence = true;
+            return true;
+        }
+
+        public bool CanPrepareFanucTransferToA(out string error)
+            => CanPrepareFanucTransfer(ProductDestination.A, out error);
+
+        public bool CanPrepareFanucTransfer(ProductDestination destination, out string error)
+        {
+            if (destination != ProductDestination.A && destination != ProductDestination.B)
+            { error = "FANUC 운반 목적지는 A 또는 B여야 합니다."; return false; }
+            if (!CanReadReady(out error) || !ClockReady(out error)) return false;
+            if (State != CellRunState.Stopped || !AtRest || hasControlledSequence ||
+                HasPendingSequence(scaraSequence) || HasPendingSequence(fanucSequence))
+            { error = "두 로봇을 정지하고 기존 인계/미완료 경로를 정리한 뒤 FANUC 운반을 준비하세요."; return false; }
+            if (!ReferenceEquals(scaraGripper.HeldItem, null) || !ReferenceEquals(fanucGripper.HeldItem, null))
+            { error = "두 집게가 비어 있어야 합니다."; return false; }
+            if (tracker.HandoffProductId == null || !tracker.TryGet(tracker.HandoffProductId, out var product) || product.Destination != destination)
+            { error = $"인계대에 목적지 {destination}인 등록 상품이 필요합니다."; return false; }
+            return tracker.TryCheckPhysicalState(out error) && TryCheckScaraRetreat(out error);
+        }
+
+        public bool TryPrepareFanucTransferToA(out string error)
+            => TryPrepareFanucTransfer(ProductDestination.A, out error);
+
+        public bool TryPrepareFanucTransfer(ProductDestination destination, out string error)
+        {
+            if (!CanPrepareFanucTransfer(destination, out error)) return false;
+            tracker.TryGet(tracker.HandoffProductId, out var current);
+            return TryPrepareFanucTransfer(destination, current, out error);
+        }
+
+        public bool TryPrepareFanucTransferToA(ProductRecord expected, out string error)
+            => TryPrepareFanucTransfer(ProductDestination.A, expected, out error);
+
+        public bool TryPrepareFanucTransfer(ProductDestination destination, ProductRecord expected, out string error)
+        {
+            if (!CanPrepareFanucTransfer(destination, out error)) return false;
+            if (expected == null || expected.Id != tracker.HandoffProductId || !tracker.TryGet(expected.Id, out var current) || !ReferenceEquals(expected, current))
+            { error = "표시 후 인계 상품 기록이 바뀌었습니다. 현재 상품을 다시 확인하세요."; return false; }
+            tracker.TryGetItem(expected.Id, out var item);
+            if (!fanucSequence.TryPrepareFanucTransfer(this, layout, fanucGripper, item, destination, out error)) return false;
+            controlledSequence = fanucSequence; hasControlledSequence = true;
+            return true;
+        }
+
+        internal bool TryCheckScaraRetreat(out string error)
+        {
+            error = null;
+            var set = layout != null ? layout.ScaraHandoffWaypoints : null;
+            if (scara == null || !scara.IsReady || set == null || set.Robot != RobotWaypointSet.RobotType.Scara)
+            { error = "SCARA와 지정 퇴피 경유점 연결을 확인하세요."; return false; }
+            if (!set.TryValidate(out error) || !scara.TryReadFkDiagnostics(out var d, out error)) return false;
+            float yaw = Vector3.SignedAngle(Vector3.forward, set.Retreat.Rotation * Vector3.forward, Vector3.up);
+            if (d.PositionErrorMetres > .00001f || d.YawErrorDegrees > .005f ||
+                Vector3.Distance(d.ActualPositionMetres, set.Retreat.PositionMetres) > .002f || Mathf.Abs(Mathf.DeltaAngle(d.ActualYawDegrees, yaw)) > .5f)
+            { error = "SCARA의 실제 TCP/FK와 지정 퇴피점을 확인하세요. 퇴피 전에는 FANUC 인계 운반을 허용하지 않습니다."; return false; }
+            return true;
+        }
+
         public bool TryReleaseControl(out string error)
         {
             if (!Ready(out error) || !CanReleaseControl(out error)) return false;
             controlledSequence = null;
             hasControlledSequence = false;
+            ClearAutomaticTransfer();
             return true;
         }
 
@@ -138,6 +267,7 @@ namespace LineWatch
             {
                 controlledSequence = null;
                 hasControlledSequence = false;
+                ClearAutomaticTransfer();
             }
             return true;
         }
@@ -169,6 +299,7 @@ namespace LineWatch
             tracker.ResetScenarioFromCell(reason.Trim());
             scaraSequence.ResetScenarioFromCell(reason.Trim()); fanucSequence.ResetScenarioFromCell(reason.Trim());
             controlledSequence = null; hasControlledSequence = false;
+            ClearAutomaticTransfer();
             return true;
         }
 
@@ -186,6 +317,8 @@ namespace LineWatch
             if (command == CellRunCommand.Stop) return policy.CanExecute(command, out error);
             if (command == CellRunCommand.Reset) return CanRecover(out error);
             if (!CanReadReady(out error) || !ClockReady(out error) || !policy.CanExecute(command, out error)) return false;
+            if (command == CellRunCommand.Start && AutomaticPhase == AutomaticTransferPhase.Completed)
+            { error = "자동 운전이 완료되었습니다. 권한을 반환하고 다음 상품을 준비하세요."; return false; }
             if (command == CellRunCommand.Start || command == CellRunCommand.Resume)
             {
                 if (!AtRest) { error = "두 로봇을 정지한 뒤 셀을 시작/재개하세요."; return false; }
@@ -339,7 +472,106 @@ namespace LineWatch
         private bool AtRest => scaraGripper != null && fanucGripper != null && scaraGripper.IsStopped && fanucGripper.IsStopped;
         private static bool HasPendingSequence(RobotWaypointSequence sequence) => sequence.HasPendingProgram;
 
-        private void Update() => SynchronizeFault();
+        private void FixedUpdate()
+        {
+            if (!IsAutomaticContinuous || AutomaticPhase != AutomaticTransferPhase.WaitingForInput || State != CellRunState.Running || !ClockReady(out _)) return;
+            SynchronizeFault();
+            if (IsFaulted) return;
+            if (!tracker.TryCheckPhysicalState(out var error)) { Fault(error); return; }
+            if (tracker.InputProductId != null) return; // A retained Input record is retried by Update after explicit recovery.
+            automaticInputPreparation = true;
+            try
+            {
+                if (!tracker.TrySupplyNextFromCell(this, Time.fixedDeltaTime, out error)) Fault(error);
+            }
+            finally { automaticInputPreparation = false; }
+        }
+
+        private void Update()
+        {
+            SynchronizeFault();
+            if (State != CellRunState.Running || !hasControlledSequence || !ClockReady(out _)) return;
+            if (AutomaticPhase == AutomaticTransferPhase.WaitingForInput)
+            {
+                if (!tracker.TryCheckPhysicalState(out var error)) { Fault(error); return; }
+                if (tracker.InputProductId == null)
+                {
+                    var waiting = tracker.WaitingSnapshot();
+                    if (waiting.Count == 0 || waiting[0] != AutomaticProductId)
+                    { Fault("대기하던 선두 상품이 바뀌었습니다. 자동 대상을 교체하지 않습니다."); return; }
+                    if (!tracker.IsNextWaitingAligned()) return;
+                }
+                bool prepared;
+                automaticInputPreparation = true;
+                try
+                {
+                    if (tracker.InputProductId == null && !tracker.TryFeedNextFromCell(this, out _, out error)) { Fault(error); return; }
+                    if (tracker.InputProductId != AutomaticProductId || !tracker.TryGet(AutomaticProductId, out var record) || record.Destination != automaticDestination ||
+                        record.Location != ProductLocation.Input || !tracker.TryGetItem(AutomaticProductId, out var item))
+                    { Fault("연속 운전의 투입 상품·원래 실물·목적지를 확인하세요."); return; }
+                    prepared = scaraSequence.TryPrepareScaraTransfer(this, layout, scaraGripper, item, out error);
+                }
+                finally { automaticInputPreparation = false; }
+                if (!prepared) { Fault(error); return; }
+                controlledSequence = scaraSequence;
+                AutomaticPhase = AutomaticTransferPhase.Scara;
+                ResumeControlledPath(out _);
+            }
+            else if (AutomaticPhase == AutomaticTransferPhase.Scara && controlledSequence == scaraSequence && scaraSequence.State == RobotWaypointSequence.RunState.Completed)
+            {
+                if (!tracker.TryGet(AutomaticProductId, out var record) || record.Location != ProductLocation.Handoff || record.Destination != automaticDestination ||
+                    !tracker.TryGetItem(AutomaticProductId, out var item) || item != scaraSequence.CycleItem ||
+                    !AtRest || scaraGripper.HeldItem != null || fanucGripper.HeldItem != null)
+                { Fault("자동 인계 상품·원래 실물·목적지·두 집게의 정지/보유를 확인하세요."); return; }
+                if (!tracker.TryCheckPhysicalState(out var error) || !TryCheckScaraRetreat(out error)) { Fault(error); return; }
+                // Preparation is atomic. Keep the SCARA permission if FANUC validation fails.
+                bool prepared;
+                automaticHandoffPreparation = true;
+                try { prepared = fanucSequence.TryPrepareFanucTransfer(this, layout, fanucGripper, item, automaticDestination, out error); }
+                finally { automaticHandoffPreparation = false; }
+                if (!prepared) { Fault(error); return; }
+                controlledSequence = fanucSequence;
+                AutomaticPhase = AutomaticTransferPhase.Fanuc;
+                ResumeControlledPath(out _);
+            }
+            else if (AutomaticPhase == AutomaticTransferPhase.Fanuc && controlledSequence == fanucSequence && fanucSequence.State == RobotWaypointSequence.RunState.Completed)
+            {
+                var output = automaticDestination == ProductDestination.A ? ProductLocation.OutputA : ProductLocation.OutputB;
+                if (!tracker.TryGet(AutomaticProductId, out var record) || record.Location != output || record.Destination != automaticDestination ||
+                    !tracker.TryGetItem(AutomaticProductId, out var item) || item != fanucSequence.CycleItem || item.Owner != null ||
+                    !AtRest || scaraGripper.HeldItem != null || fanucGripper.HeldItem != null || fanucSequence.GripCount != 1 || fanucSequence.ReleaseCount != 1)
+                { Fault("자동 단품의 배출 기록·실제 보유·행동 횟수가 맞지 않습니다."); return; }
+                var waiting = tracker.WaitingSnapshot();
+                if (IsAutomaticContinuous && waiting.Count > 0)
+                {
+                    if (!tracker.TryGet(waiting[0], out var next) || next.Location != ProductLocation.Waiting)
+                    { Fault("다음 선두 상품의 대기 기록이 유효하지 않습니다."); return; }
+                    AutomaticProductId = next.Id; automaticDestination = next.Destination;
+                    AutomaticPhase = AutomaticTransferPhase.WaitingForInput;
+                }
+                else
+                {
+                    AutomaticPhase = AutomaticTransferPhase.Completed;
+                    TryExecute(CellRunCommand.Stop, out _);
+                }
+            }
+        }
+
+        internal bool AllowsAutomaticHandoffPreparation(RobotWaypointSequence candidate) => automaticHandoffPreparation &&
+            AutomaticPhase == AutomaticTransferPhase.Scara && State == CellRunState.Running &&
+            hasControlledSequence && controlledSequence == scaraSequence && scaraSequence.State == RobotWaypointSequence.RunState.Completed &&
+            candidate == fanucSequence && AtRest;
+
+        internal bool AllowsAutomaticInputPreparation(Component candidate) => automaticInputPreparation && IsAutomaticContinuous &&
+            AutomaticPhase == AutomaticTransferPhase.WaitingForInput && State == CellRunState.Running &&
+            hasControlledSequence && controlledSequence == fanucSequence && fanucSequence.State == RobotWaypointSequence.RunState.Completed &&
+            (candidate == tracker || candidate == scaraSequence) && !HasPendingSequence(scaraSequence) && AtRest &&
+            ReferenceEquals(scaraGripper.HeldItem, null) && ReferenceEquals(fanucGripper.HeldItem, null);
+
+        private void ClearAutomaticTransfer()
+        {
+            AutomaticPhase = AutomaticTransferPhase.None; AutomaticProductId = null; IsAutomaticContinuous = false;
+        }
         private void SynchronizeFault()
         {
             if (!Application.isPlaying || IsFaulted) return;
