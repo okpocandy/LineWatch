@@ -595,6 +595,7 @@ MonoBehaviour:
   handoffZone: {fileID: 1007444315}
   inputStop: {fileID: 1296945144}
   handoffPoint: {fileID: 1149568519}
+  handoffEquipment: {fileID: 336028341}
   outputA: {fileID: 1631483810}
   outputB: {fileID: 73497829}
   productPrefab: {fileID: 7582488060711929195, guid: 31dcb0f7e6c2b36429fbce54865e1b12, type: 3}

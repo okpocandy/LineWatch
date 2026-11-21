@@ -14,6 +14,7 @@ namespace LineWatch
         [SerializeField] private Transform handoffZone;
         [SerializeField] private Transform inputStop;
         [SerializeField] private Transform handoffPoint;
+        [SerializeField] private Transform handoffEquipment;
         [SerializeField] private Transform outputA;
         [SerializeField] private Transform outputB;
         [SerializeField] private GrippableItem productPrefab;
@@ -29,6 +30,7 @@ namespace LineWatch
         public Transform HandoffZone => handoffZone;
         public Transform InputStop => inputStop;
         public Transform HandoffPoint => handoffPoint;
+        public Transform HandoffEquipment => handoffEquipment;
         public Transform OutputA => outputA;
         public Transform OutputB => outputB;
         public GrippableItem ProductPrefab => productPrefab;
