@@ -12,6 +12,9 @@ namespace LineWatch
         [SerializeField] private Transform scaraZone;
         [SerializeField] private Transform fanucZone;
         [SerializeField] private Transform handoffZone;
+        [SerializeField] private MeshFilter scaraFootprint;
+        [SerializeField] private MeshFilter fanucFootprint;
+        [SerializeField] private MeshFilter handoffFootprint;
         [SerializeField] private Transform inputStop;
         [SerializeField] private Transform handoffPoint;
         [SerializeField] private Transform handoffEquipment;
@@ -28,6 +31,9 @@ namespace LineWatch
         public Transform ScaraZone => scaraZone;
         public Transform FanucZone => fanucZone;
         public Transform HandoffZone => handoffZone;
+        public MeshFilter ScaraFootprint => scaraFootprint;
+        public MeshFilter FanucFootprint => fanucFootprint;
+        public MeshFilter HandoffFootprint => handoffFootprint;
         public Transform InputStop => inputStop;
         public Transform HandoffPoint => handoffPoint;
         public Transform HandoffEquipment => handoffEquipment;

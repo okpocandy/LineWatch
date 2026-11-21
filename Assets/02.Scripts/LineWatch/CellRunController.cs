@@ -344,6 +344,61 @@ namespace LineWatch
             return CheckCommandAdmission(target, requester, out error);
         }
 
+        public bool CanMoveManualTcp(Component robot, Vector3 robotLocalTarget, out string error)
+        {
+            if (!CanReadReady(out error) || !ClockReady(out error)) return false;
+            if (robot != scara && robot != fanuc) { error = "현재 셀의 SCARA 또는 FANUC를 선택하세요."; return false; }
+            if (!CheckCommandAdmission(robot, null, out error)) return false;
+            if (!ReferenceEquals(scaraGripper.HeldItem, null) || !ReferenceEquals(fanucGripper.HeldItem, null))
+            { error = "수동 TCP 목표는 두 집게의 실제 보유가 비어 있을 때만 허용합니다."; return false; }
+            if (!tracker.TryCheckPhysicalState(out error)) return false;
+            bool isScara = robot == scara;
+            var otherGripper = isScara ? fanucGripper : scaraGripper;
+            if (!otherGripper.IsStopped) { error = "다른 로봇의 이동을 정지한 뒤 수동 TCP 목표를 요청하세요."; return false; }
+            var ownZone = isScara ? layout.ScaraZone : layout.FanucZone;
+            if (!TryReadZone(ownZone, isScara ? layout.ScaraFootprint : layout.FanucFootprint, out var ownFrame, out var ownBounds) ||
+                !TryReadZone(layout.HandoffZone, layout.HandoffFootprint, out var sharedFrame, out var sharedBounds))
+            { error = "현재 셀의 작업/인계 구역 경계를 확인하세요."; return false; }
+            if (!ownZone.gameObject.activeInHierarchy) { error = "선택 로봇의 작업구역이 비활성입니다."; return false; }
+            var frame = isScara ? scara.RobotFrame : fanuc.RobotFrame;
+            var world = frame.TransformPoint(robotLocalTarget);
+            // Shared restrictions take precedence where the authored footprints overlap.
+            if (InZone(sharedFrame, sharedBounds, world))
+            {
+                if (!layout.HandoffZone.gameObject.activeInHierarchy || tracker.HandoffProductId != null)
+                { error = "공유 인계구역이 비활성 또는 상품 점유 중입니다."; return false; }
+                var otherTcp = isScara ? fanuc.Tcp : scara.Tcp;
+                if (InZone(sharedFrame, sharedBounds, otherTcp.position))
+                { error = "공유 인계구역에 다른 로봇의 TCP가 있습니다."; return false; }
+                foreach (var record in tracker.Snapshot())
+                    if (tracker.TryGetItem(record.Id, out var item) && item.gameObject.activeInHierarchy)
+                    {
+                        if (item.Body == null) { error = "등록 상품 " + record.Id + "의 실제 본체를 확인하세요."; return false; }
+                        if (InZone(sharedFrame, sharedBounds, item.Body.position))
+                        { error = "공유 인계구역에 등록 상품 " + record.Id + "의 실물이 있습니다."; return false; }
+                    }
+                return true;
+            }
+            if (!InZone(ownFrame, ownBounds, world)) { error = "수동 목표는 자기 작업구역 또는 비어 있는 공유 인계구역 안이어야 합니다."; return false; }
+            return true;
+        }
+
+        private bool TryReadZone(Transform zone, MeshFilter footprint, out Transform frame, out Bounds bounds)
+        {
+            frame = null; bounds = default;
+            if (zone == null || !zone.IsChildOf(transform)) return false;
+            if (footprint == null || !footprint.transform.IsChildOf(zone) || footprint.sharedMesh == null) return false;
+            frame = footprint.transform; bounds = footprint.sharedMesh.bounds;
+            var scale = frame.lossyScale;
+            return bounds.extents.x > 0 && bounds.extents.z > 0 && Mathf.Abs(scale.x) > .000001f &&
+                Mathf.Abs(scale.y) > .000001f && Mathf.Abs(scale.z) > .000001f;
+        }
+        private static bool InZone(Transform frame, Bounds bounds, Vector3 world)
+        {
+            var local = frame.InverseTransformPoint(world);
+            return local.x >= bounds.min.x && local.x <= bounds.max.x && local.z >= bounds.min.z && local.z <= bounds.max.z;
+        }
+
         // Side-effect-free UI queries. Expensive path/IK/alignment validation remains at
         // execution time; reading a panel must never fault, stop or command the cell.
         public bool CanExecute(CellRunCommand command, out string error)
@@ -763,6 +818,11 @@ namespace LineWatch
             if (!managed) return true;
             if (controller == null) { error = "셀 운전 관리자가 없습니다. 로봇 명령을 차단합니다."; return false; }
             return controller.CanIssueLegacyCommand(target, requester, out error);
+        }
+        internal bool CanIssueTcp(RobotWaypointSequence requester, Vector3 localTarget, out string error)
+        {
+            if (!CanIssue(requester, out error)) return false;
+            return !managed || requester != null || controller.CanMoveManualTcp(target, localTarget, out error);
         }
         internal bool IsManagedBy(CellRunController owner) => managed && controller != null && controller == owner;
     }

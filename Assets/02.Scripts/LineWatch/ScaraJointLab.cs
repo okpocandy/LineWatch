@@ -33,6 +33,11 @@ namespace LineWatch
         public double AppliedMotionSeconds { get; private set; }
         public string LastMotionError { get; private set; }
         public uint CommandVersion { get; private set; }
+        public Vector3? LastAcceptedTcpPosition { get; private set; }
+        public float LastAcceptedTcpYawDegrees { get; private set; }
+        public bool? LastTcpRequestAccepted { get; private set; }
+        public string LastTcpRequestError { get; private set; }
+        public IK.Result LastMoveIkResult { get; private set; }
         public ScaraForwardKinematics.Geometry Geometry => ReadGeometry();
 
         public readonly struct FkDiagnostics
@@ -206,9 +211,18 @@ namespace LineWatch
         private bool MoveTcp(Vector3 targetMetres, float yawDegrees, IkSelection selection, MotionMode motion,
             RobotWaypointSequence requester, out IK.Solution selected, out string error)
         {
+            LastMoveIkResult = null;
+            bool accepted = MoveTcpCore(targetMetres, yawDegrees, selection, motion, requester, out selected, out error);
+            LastTcpRequestAccepted = accepted; LastTcpRequestError = error;
+            return accepted;
+        }
+
+        private bool MoveTcpCore(Vector3 targetMetres, float yawDegrees, IkSelection selection, MotionMode motion,
+            RobotWaypointSequence requester, out IK.Solution selected, out string error)
+        {
             selected = default;
             error = null;
-            if (!cellGate.CanIssue(requester, out error)) return false;
+            if (!cellGate.CanIssueTcp(requester, targetMetres, out error)) return false;
 #if UNITY_EDITOR
             if (UnityEditor.EditorApplication.isPaused)
             {
@@ -222,7 +236,9 @@ namespace LineWatch
                 return false;
             }
             // Recalculate on every request: a displayed candidate may have stale geometry or limits.
-            if (!TryPrepareMotion(targetMetres, yawDegrees, selection, motion, out _, out selected, out var plan, out error)) return false;
+            bool prepared = TryPrepareMotion(targetMetres, yawDegrees, selection, motion, out var result, out selected, out var plan, out error);
+            LastMoveIkResult = result;
+            if (!prepared) return false;
             var j = selected.Joints;
             if (!axis1.CanMoveTo(j.Q1Degrees) || !axis2.CanMoveTo(j.Q2Degrees) ||
                 !axis3.CanMoveTo(j.D3Metres) || !axis4.CanMoveTo(j.Q4Degrees))
@@ -233,6 +249,7 @@ namespace LineWatch
             }
             // Commit only the complete validated plan; a failed replacement preserves the old one.
             CommandVersion++;
+            LastAcceptedTcpPosition = targetMetres; LastAcceptedTcpYawDegrees = yawDegrees;
             activePlan = plan;
             AppliedMotionSeconds = 0;
             plannedSpeeds = CurrentSpeeds();

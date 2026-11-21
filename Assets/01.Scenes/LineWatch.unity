@@ -593,6 +593,9 @@ MonoBehaviour:
   scaraZone: {fileID: 1567390189}
   fanucZone: {fileID: 2103193459}
   handoffZone: {fileID: 1007444315}
+  scaraFootprint: {fileID: 45469268}
+  fanucFootprint: {fileID: 522007390}
+  handoffFootprint: {fileID: 1347807331}
   inputStop: {fileID: 1296945144}
   handoffPoint: {fileID: 1149568519}
   handoffEquipment: {fileID: 336028341}

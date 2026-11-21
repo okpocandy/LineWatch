@@ -29,6 +29,10 @@ namespace LineWatch
         public double AppliedMotionSeconds { get; private set; }
         public string LastMotionError { get; private set; }
         public uint CommandVersion { get; private set; }
+        public Pose? LastAcceptedTcpTarget { get; private set; }
+        public bool? LastTcpRequestAccepted { get; private set; }
+        public string LastTcpRequestError { get; private set; }
+        public IkPreview? LastMoveIkPreview { get; private set; }
 
         public IReadOnlyList<RotaryAxis> Joints => joints;
         public Transform Tcp => tcp;
@@ -214,9 +218,18 @@ namespace LineWatch
         private bool MoveTcp(Vector3 targetMetres, Quaternion targetRotation, IkSeedPolicy policy,
             RobotWaypointSequence requester, out IkPreview preview, out string error)
         {
+            bool accepted = MoveTcpCore(targetMetres, targetRotation, policy, requester, out preview, out error);
+            LastMoveIkPreview = preview.Result != null ? (IkPreview?)preview : null;
+            LastTcpRequestAccepted = accepted; LastTcpRequestError = error;
+            return accepted;
+        }
+
+        private bool MoveTcpCore(Vector3 targetMetres, Quaternion targetRotation, IkSeedPolicy policy,
+            RobotWaypointSequence requester, out IkPreview preview, out string error)
+        {
             preview = default;
             error = null;
-            if (!cellGate.CanIssue(requester, out error)) return false;
+            if (!cellGate.CanIssueTcp(requester, targetMetres, out error)) return false;
 #if UNITY_EDITOR
             if (UnityEditor.EditorApplication.isPaused)
             {
@@ -256,6 +269,7 @@ namespace LineWatch
             candidate.Duration *= 1.00001;
             // Commit only after every axis and the whole straight joint-space segment are valid.
             CommandVersion++;
+            LastAcceptedTcpTarget = new Pose(targetMetres, targetRotation);
             activeMotion = candidate;
             AppliedMotionSeconds = 0;
             LastMotionError = null;

@@ -47,10 +47,11 @@ namespace LineWatch.Editor
             var owner = new Label { name = "cell-run-owner" };
             var automaticState = new Label { name = "cell-run-automatic-transfer" };
             var progress = new Label { name = "cell-run-progress" };
+            var handoff = new Label { name = "cell-run-handoff" };
             var scaraState = new Label { name = "cell-run-scara" };
             var fanucState = new Label { name = "cell-run-fanuc" };
             var products = new Label { name = "cell-run-products" };
-            foreach (var label in new[] { state, owner, automaticState, progress, scaraState, fanucState, products })
+            foreach (var label in new[] { state, owner, automaticState, progress, handoff, scaraState, fanucState, products })
             { label.style.whiteSpace = WhiteSpace.Normal; label.style.marginTop = 6; root.Add(label); }
             var mode = new HelpBox("", HelpBoxMessageType.Info) { name = "cell-run-mode" }; root.Add(mode);
             var fault = new HelpBox("", HelpBoxMessageType.Warning) { name = "cell-run-fault" }; root.Add(fault);
@@ -146,6 +147,7 @@ namespace LineWatch.Editor
                     transferPreview = null; transferTarget.text = "투입 상품 확인 불가";
                     automaticState.text = "자동 단품: 관리자 없음 · 상태 확인 불가";
                     progress.text = "진행 시간: 관리자 없음 · 확인 불가";
+                    handoff.text = "인계 슬롯: 관리자 없음 · 확인 불가";
                     fanucTransferPreview = null; fanucTransferTarget.text = "인계 상품 확인 불가";
                     state.text = "셀 상태: 관리자 없음 · 조작 차단"; owner.text = "명령 권한: 확인 불가";
                     scaraState.text = "SCARA: 관리자 없음 · 상태 확인 불가"; fanucState.text = "FANUC: 관리자 없음 · 상태 확인 불가";
@@ -170,13 +172,19 @@ namespace LineWatch.Editor
                 automaticState.text = !playing ? "자동 단품: Play 대기"
                     : cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.None ? "자동 단품: 미준비"
                     : (cell.IsAutomaticContinuous ? "연속 운전: " : "자동 단품: ") + cell.AutomaticProductId + " · 목적지 " + cell.AutomaticDestination + " · " + automaticPhase;
-                owner.text = "명령 권한: " + (!playing ? "Play 대기" : !cell.HasControlledSequence ? "개별 시험"
+                owner.text = "명령 권한: " + (!playing ? "Play 대기" : !cell.HasControlledSequence ? "수동/개별 명령"
                     : cell.ControlledSequence == null ? "공통 제어 · 경로 연결 없음"
                     : cell.ControlledSequence == scara ? layout.ScaraId + " 경로 · 공통 제어"
                     : cell.ControlledSequence == fanuc ? layout.FanucId + " 경로 · 공통 제어" : "공통 제어 · 경로 연결 없음");
                 scaraState.text = RobotText(layout != null ? layout.ScaraId : "SCARA", scara);
                 fanucState.text = RobotText(layout != null ? layout.FanucId : "FANUC", fanuc);
                 var tracker = cell.GetComponent<CellProductTracker>();
+                string handoffPhase = cell.State == CellRunState.Paused ? "일시정지" : cell.State == CellRunState.Stopped ? "정지 유지"
+                    : cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.Scara ? "SCARA 퇴피 확인 중"
+                    : cell.AutomaticPhase == CellRunController.AutomaticTransferPhase.Fanuc ? "FANUC 인수 중" : "인계 운전 대기";
+                handoff.text = !playing ? "인계 슬롯: Play 대기" : tracker == null ? "인계 슬롯: 추적 연결 없음"
+                    : cell.IsFaulted || tracker.IsFaulted ? "인계 슬롯: 고장 유지 · 기록 " + (tracker.HandoffProductId ?? "없음") + " · 실물 확인 필요"
+                    : tracker.HandoffProductId == null ? "인계 슬롯 기록: 비어 있음" : "인계 슬롯: 점유 " + tracker.HandoffProductId + " · " + handoffPhase;
                 transferPreview = null;
                 if (playing && tracker != null) tracker.TryGet(tracker.InputProductId, out transferPreview);
                 transferTarget.text = !playing ? "운전 준비 · Play 대기"
@@ -206,7 +214,8 @@ namespace LineWatch.Editor
                 if (tracker != null)
                 {
                     var current = tracker.CurrentScenarioSnapshot();
-                    products.text += $"\n시나리오 #{tracker.ScenarioNumber}: 등록 {current.Length} · 완료 {current.Count(r => r.Location == ProductLocation.OutputA || r.Location == ProductLocation.OutputB)} · 제거 {current.Count(r => r.Location == ProductLocation.Removed)} · 손실 {current.Count(r => r.Location == ProductLocation.Lost)} · 초기화 이력 {tracker.ScenarioSnapshot().Length}";
+                    int completedA = current.Count(r => r.Location == ProductLocation.OutputA), completedB = current.Count(r => r.Location == ProductLocation.OutputB);
+                    products.text += $"\n시나리오 #{tracker.ScenarioNumber}: 등록 {current.Length} · 완료 {completedA + completedB} (A {completedA} / B {completedB}) · 제거 {current.Count(r => r.Location == ProductLocation.Removed)} · 손실 {current.Count(r => r.Location == ProductLocation.Lost)} · 초기화 이력 {tracker.ScenarioSnapshot().Length}";
                     var recoveries = tracker.QueueRecoverySnapshot();
                     if (recoveries.Length > 0) products.text += "\n명시 대기 복귀 " + recoveries.Length + ": " + recoveries[recoveries.Length - 1].Previous.Id + " · " + recoveries[recoveries.Length - 1].Reason;
                     var losses = tracker.Snapshot().Where(r => r.Location == ProductLocation.Lost).ToArray();
@@ -507,7 +516,10 @@ namespace LineWatch.Editor
                 : string.IsNullOrEmpty(sequence.LastAcknowledgedFaultReason) ? "" : "\n최근 경로 명시 해제: " + sequence.LastAcknowledgedFaultReason;
             var cancellations = sequence.CancellationSnapshot();
             if (cancellations.Length > 0) reason += $"\n경로 명시 종료 이력 {cancellations.Length}: {cancellations[cancellations.Length - 1].Reason}";
-            return $"{id}: {sequence.State} · 단계 {step} · 실물 보유 {held}" + reason;
+            var s = sequence.GetComponent<ScaraJointLab>(); var f = sequence.GetComponent<FanucJointLab>();
+            bool tcpMoving = (s != null && s.IsTrajectoryMoving) || (f != null && f.IsTcpMoving);
+            string activity = !sequence.IsBusy && tcpMoving ? "수동 TCP 이동" : sequence.State.ToString();
+            return $"{id}: {activity} · 경로 단계 {step} · 실물 보유 {held}" + reason;
         }
     }
 }

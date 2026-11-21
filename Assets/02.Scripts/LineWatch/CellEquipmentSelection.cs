@@ -24,6 +24,7 @@ namespace LineWatch
 
         private readonly LineWatchCellLayout layout;
         public string SelectedId { get; private set; }
+        public uint SelectionRevision { get; private set; }
         public string IdSearch { get; private set; } = "";
         public EquipmentKind? KindFilter { get; private set; }
 
@@ -47,12 +48,15 @@ namespace LineWatch
         public bool TrySelect(string id, out string error)
         {
             if (!TryRead(id, out var entry, out error)) return false;
-            SelectedId = entry.Id;
+            if (SelectedId != entry.Id) { SelectedId = entry.Id; SelectionRevision++; }
             return true;
         }
 
         public bool TryGetSelected(out EquipmentInfo entry) => TryRead(SelectedId, out entry, out _);
-        public void ClearSelection() => SelectedId = null;
+        public void ClearSelection()
+        {
+            if (SelectedId != null) { SelectedId = null; SelectionRevision++; }
+        }
 
         public void SetFilter(string idSearch, EquipmentKind? kind)
         {
